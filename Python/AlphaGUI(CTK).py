@@ -173,7 +173,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
     def _load_data(self):
         try:
-            df = pd.read_excel(self.path, header=self.header_row, nrows=5)
+            df = pd.read_excel(self.path, header=self.header_row)
         except Exception:
             messagebox.showerror("File Error", "Failed to read the file with selected header row.")
             return
@@ -191,19 +191,26 @@ class AlphaAnalysisApp(ctk.CTk):
         except Exception:
             messagebox.showerror("Bad Date", "Date must be YYYY-MM-DD.")
             return
+        
+        if self.elapsed_mode.get():
+            try:
+                self.df[self.time_col] = pd.to_timedelta(int(self.df[self.time_col]))
+            except Exception:
+                messagebox.showerror("Parse Error", "Elapsed time column could not be parsed.")
+                return
+        else:
+            try:
+                self.df['ParsedTime'] = pd.to_datetime(
+                    date_str + ' ' + self.df[self.time_col].astype(str),
+                    format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
+            except Exception:
+                messagebox.showerror("Parse Error", "Time column could not be parsed.")
+                return
 
-        try:
-            self.df['ParsedTime'] = pd.to_datetime(
-                date_str + ' ' + self.df[self.time_col].astype(str),
-                format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
-        except Exception:
-            messagebox.showerror("Parse Error", "Time column could not be parsed.")
-            return
-
-        self.df.dropna(subset=['ParsedTime'], inplace=True)
-        if self.df.empty:
-            messagebox.showerror("Parse Error", "No valid times found.")
-            return
+            self.df.dropna(subset=['ParsedTime'], inplace=True)
+            if self.df.empty:
+                messagebox.showerror("Parse Error", "No valid times found.")
+                return
 
         self.elapsed_col = 'Elapsed'
         self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
