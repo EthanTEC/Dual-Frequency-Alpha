@@ -21,7 +21,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
         # Data attributes
         self.df = None
-        self.zones = []
+        self.zones = [] # list of dicts: {'start', 'end', 'patch', 'label'}
         self.header_row = None
         self.time_col = None
         self.pressure_cols = []
@@ -49,7 +49,6 @@ class AlphaAnalysisApp(ctk.CTk):
 
         ctk.CTkLabel(self.control, text="2. Preview & Choose Header Row", anchor='w').pack(fill='x')
         self.preview = ctk.CTkFrame(self.control)
-        # Fix preview size: fixed height, no horizontal expand
         self.preview.configure(height=180)
         self.preview.pack(fill='x', pady=(5,10))
         self.preview.pack_propagate(False)
@@ -137,7 +136,9 @@ class AlphaAnalysisApp(ctk.CTk):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_f)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        NavigationToolbar2Tk(self.canvas, self.plot_f)
         self.rs = None
+        self.canvas.mpl_connect('button_press_event', self._on_click)
 
     def _on_resize(self, event):
         w = self.winfo_width() or self.base_width
@@ -145,6 +146,23 @@ class AlphaAnalysisApp(ctk.CTk):
         new_size = max(6, int(self.base_font_size * w / self.base_width))
         self.ui_font.configure(size=new_size)
 
+    def _on_click(self, event):
+        #Right-click to clear zones only after data is loaded
+        if event.button != 3 or event.inaxes != self.ax or self.df is None:
+            return
+        x = event.xdata
+        for zi, z in enumerate(self.zones):
+            if z['start'] <= x <= z['end']:
+                z['patch'].remove()
+                z['label'].remove()
+                self.zones.pop(zi)
+                break
+        # Renumber zones
+        for idx, z in enumerate(self.zones, 1):
+            z['label'].set_text(str(idx))
+            mid = (z['start'] + z['end']) / 2
+            z['label'].set_x(mid)
+        self.canvas.draw()
 
 
 
@@ -202,48 +220,55 @@ class AlphaAnalysisApp(ctk.CTk):
             interactive=True,
             props=dict(facecolor='red', alpha=0.3, edgecolor='black', linewidth=1)
         )
+        self.rs.set_active(True)
 
     def _on_select(self, e1, e2):
-        if e1.xdata is None or e2.xdata is None:
+        if self.df is None or e1.xdata is None or e2.xdata is None:
             return
         x1, x2 = sorted([e1.xdata, e2.xdata])
         if x2 - x1 < self.min_var.get():
             return
-        self.zones.append((x1, x2))
-        self.ax.axvspan(x1, x2, color='red', alpha=0.3)
-        idx = len(self.zones)
-        col = self.pressure_cols[0]
-        y_max = self.df[col].max()
-        self.ax.text((x1 + x2)/2, y_max, str(idx), ha='center', va='top', bbox=dict(fc='yellow'))
+        patch = self.ax.axvspan(x1, x2, color='red', alpha=0.3)
+        idx = len(self.zones) + 1
+        y_max = max(self.df[col].max() for col in self.pressure_cols)
+        label = self.ax.text((x1+x2)/2, y_max, str(idx), ha='center', va='top', bbox=dict(fc='yellow'))
+        self.zones.append({'start':x1, 'end':x2, 'patch':patch, 'label':label})
         self.canvas.draw()
 
     def _redraw(self):
         self.ax.clear()
         if self.df is None:
+            self.canvas.draw()
             return
         for col in self.pressure_cols:
             self.ax.plot(self.df[self.elapsed_col], self.df[col], label=col)
-        for i, (x1, x2) in enumerate(self.zones, 1):
-            self.ax.axvspan(x1, x2, color='red', alpha=0.3)
+        for idx, z in enumerate(self.zones, 1):
+            patch = self.ax.axvspan(z['start'], z['end'], color='red', alpha=0.3)
+            y_max = max(self.df[col].max() for col in self.pressure_cols)
+            label = self.ax.text((z['start']+z['end'])/2, y_max, str(idx), ha='center', va='top', bbox=dict(fc='yellow'))
+            z['patch'], z['label'] = patch, label
         self.ax.legend()
         self.ax.set_xlabel('Elapsed Time [s]')
         self.ax.grid(True)
         self.canvas.draw()
 
     def _confirm(self):
-        # Prepare zone messages
-        zone_messages = []
-        suffix = lambda n: 'th' if 11 <= n % 100 <= 13 else {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th')
-        for i, (start, end) in enumerate(self.zones, 1):
-            zone_messages.append(f"{i}{suffix(i)} zone: {start:.2f}s to {end:.2f}s")
-        message = "\n".join(zone_messages)
 
-        # Confirm with user
-        if not messagebox.askokcancel("Selected Zones", message):
+        # Ensure there are zones to confirm
+        if not self.zones:
+            messagebox.showwarning("No zones selected", "Please create at least one zone before confirming.")
+            return
+        
+        # Prepare zone messages
+        msgs = []
+        for idx, z in enumerate(self.zones, 1):
+            msgs.append(f"Zone {idx}: {z['start']:.2f}s to {z['end']:.2f}s")
+        if not messagebox.askokcancel("Confirm Zones", "\n".join(msgs)): # Stop if user cancels
             return
 
         # For each selected zone, create a Toplevel window with embedded plots
-        for i, (start, end) in enumerate(self.zones, 1):
+        for i, z in enumerate(self.zones, 1):
+            start, end = z['start'], z['end']
             zone_df = self.df[(self.df[self.elapsed_col] >= start) & (self.df[self.elapsed_col] <= end)].copy()
             if zone_df.empty:
                 messagebox.showerror("Zone Error", f"Zone {i} is empty.")
