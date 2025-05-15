@@ -115,13 +115,12 @@ class AlphaAnalysisApp(ctk.CTk):
         if not sel: return
         self.header_row = int(sel[0])
         self.hdr_lbl.configure(text=f"Header row: {self.header_row+1}")
-        path = self.file_lbl.cget('text')
+        self.path = self.file_lbl.cget('text')
         try:
-            df = pd.read_excel(path, header=self.header_row)
+            df = pd.read_excel(self.path, header=self.header_row, nrows=5)
         except Exception:
             messagebox.showerror("File Error", "Failed to read the file with selected header row.")
             return
-        self.df = df
         cols = list(df.columns)
         self.time_cb.config(values=cols, state='readonly')
         self.time_cb.set("")
@@ -173,6 +172,13 @@ class AlphaAnalysisApp(ctk.CTk):
         self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
 
     def _load_data(self):
+        try:
+            df = pd.read_excel(self.path, header=self.header_row, nrows=5)
+        except Exception:
+            messagebox.showerror("File Error", "Failed to read the file with selected header row.")
+            return
+        self.df = df
+        
         if self.df is None or not self.time_col or not self.pressure_cols:
             messagebox.showwarning("Incomplete", "Ensure header, time, and pressure columns chosen.")
             return
