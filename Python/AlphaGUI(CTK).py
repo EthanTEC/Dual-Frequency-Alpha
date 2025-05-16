@@ -18,6 +18,7 @@ Dependencies:
 - matplotlib
 - threading
 - datetime
+- Pillow
 
 NOTE:   This code is designed to be run in a Python environment with the required libraries installed.
         The code is structured to be modular, with separate functions for each part of the GUI and data processing.
@@ -36,6 +37,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from datetime import datetime
+from PIL import Image, ImageTk
 
 # Appearance setup
 ctk.set_appearance_mode('System')
@@ -81,11 +83,20 @@ class AlphaAnalysisApp(ctk.CTk):
         self.control = ctk.CTkFrame(self)
         self.control.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
         self.control.pack_propagate(False)
-        self.plot_f = ctk.CTkFrame(self)
-        self.plot_f.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.timePlot = ctk.CTkFrame(self)
+        self.timePlot.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self._build_controls()
         self._build_plot()
+
+        # Loading Gif holder
+        canvas_widget = self.canvas.get_tk_widget()
+        canvas_bg = canvas_widget.cget('bg')
+        self.loading_gif_path = "Images/LoadingGIF.gif"
+        self.loading_gif_frames = []
+        self.current_frame = 0
+        self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
+        self.loading = False
 
     def _on_configure(self, event):
         if self._resize_job:
@@ -159,9 +170,9 @@ class AlphaAnalysisApp(ctk.CTk):
 
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_f)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.timePlot)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        NavigationToolbar2Tk(self.canvas, self.plot_f)
+        NavigationToolbar2Tk(self.canvas, self.timePlot)
         self.rs = None
         self.canvas.mpl_connect('button_press_event', self._on_click)
 
@@ -203,6 +214,7 @@ class AlphaAnalysisApp(ctk.CTk):
             tkmsg.showwarning("Incomplete","Select header, time, and pressure columns.")
             return
         else:
+        # Process data in a separate thread to avoid blocking the UI
             threading.Thread(target=self._process_data, daemon=True).start()
 
         # ask date in main thread
@@ -218,10 +230,17 @@ class AlphaAnalysisApp(ctk.CTk):
         # collect cols
         self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
         self.collected_date = True
+
+        if self.loading:
+            self._play_loading_gif()
+        self.loading = True
         
 
     def _process_data(self):
-        # Proces data in a separate thread to avoid blocking the UI
+
+        # Flag you are loading data
+        self.loading = True
+
         path = self.file_lbl.cget('text')
         parsed_data = pd.read_excel(path, header=self.header_row)
 
@@ -249,7 +268,11 @@ class AlphaAnalysisApp(ctk.CTk):
             self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
         self.after(0, self._on_data_ready)
 
+        # Signal you are done loading data
+        self.loading = False
+
     def _on_data_ready(self):
+        self.loading_label.place_forget()
         self.zones = []
         self._enable_selector()
         self._redraw()
@@ -361,6 +384,33 @@ class AlphaAnalysisApp(ctk.CTk):
             toolbar = NavigationToolbar2Tk(canvas, win)
             toolbar.update()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _get_loading_frames(self):
+        gif = Image.open(self.loading_gif_path)
+        frames = []
+        try:
+            while True:
+                frame = ImageTk.PhotoImage(gif.copy().convert('RGBA'))
+                frames.append(frame)
+                gif.seek(len(frames))  # move to next frame
+        except EOFError:
+            pass  # end of sequence
+        return frames
+
+    def _next_frame(self):
+        if self.loading_gif_frames:
+            self.current_frame = (self.current_frame + 1) % len(self.loading_gif_frames)
+            self.loading_label.config(image=self.loading_gif_frames[self.current_frame])
+            if self.loading:
+                self.loading_label.after(33, self._next_frame) # 33ms delay for GIF frames = 30 fps
+
+    def _play_loading_gif(self):
+        if not self.loading_gif_frames:
+            self.loading_gif_frames = self._get_loading_frames()
+        self.loading_label.place(relx=0.5, rely=0.5, anchor='center')
+        self.loading_label.lift(self.canvas.get_tk_widget())
+        self.loading_label.config(image=self.loading_gif_frames[0])
+        self._next_frame()
 
     def _on_closing(self):
         if self._resize_job:
