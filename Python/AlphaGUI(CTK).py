@@ -1,35 +1,55 @@
+import threading
 import tkinter as tk
 import customtkinter as ctk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, simpledialog
+from tkinter import messagebox as tkmsg
 import pandas as pd
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
-import tkinter.font as tkfont
 from datetime import datetime
+import tkinter.font as tkfont
 
-# Initialize CustomTkinter Appearance
+# Appearance setup
 ctk.set_appearance_mode('System')
 ctk.set_default_color_theme('blue')
 
 class AlphaAnalysisApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Alpha Analysis Application")
+        self.title("Alpha Analysis (Optimized)")
         self.geometry("1600x900")
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-        # Data attributes
+        # Debounce resize
+        self._resize_job = None
+        self.bind('<Configure>', self._on_configure)
+
+        # Base dimensions for scaling
+        self.base_width = 1600
+        self.base_height = 900
+        self.base_font_size = 12
+        self.ui_font = "Segoe UI"
+        self.ui_style = (self.ui_font, self.base_font_size)
+
+        # Style for ttk Treeview
+        self.ttk_style = ttk.Style(self)
+        self.ttk_style.configure('Treeview', font=(self.ui_font, self.base_font_size), rowheight=self.base_font_size*2)
+        self.ttk_style.configure('Treeview.Heading', font=("Segoe UI", self.base_font_size//2, 'bold'))
+
+        # Data placeholders
         self.df = None
-        self.zones = [] # list of dicts: {'start', 'end', 'patch', 'label'}
-        self.header_row = None
+        self.zones = []  # dicts: {'start','end','patch','label'}
         self.time_col = None
         self.pressure_cols = []
         self.elapsed_col = None
-        self.test_date = None  # store for export
+        self.test_date = None
+        self.header_row = None
+        self.collected_date = False
 
-        # Elapsed-mode toggle
-        self.elapsed_mode = tk.BooleanVar(value=False)  # False=Absolute, True=Elapsed
+        # Elapsed switch
+        self.elapsed_mode = tk.BooleanVar(value=False)
 
         # Layout frames
         self.control = ctk.CTkFrame(self)
@@ -41,20 +61,48 @@ class AlphaAnalysisApp(ctk.CTk):
         self._build_controls()
         self._build_plot()
 
-    def _build_controls(self):
-        ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w').pack(fill='x', pady=(0,5))
-        ctk.CTkButton(self.control, text="Browse...", command=self._select_file).pack(fill='x', pady=(0,10))
-        self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w')
-        self.file_lbl.pack(fill='x', pady=(0,10))
+    def _on_configure(self, event):
+        if self._resize_job:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(200, self._resize_widgets)
 
-        ctk.CTkLabel(self.control, text="2. Preview & Choose Header Row", anchor='w').pack(fill='x')
-        self.preview = ctk.CTkFrame(self.control)
-        self.preview.configure(height=180)
-        self.preview.pack(fill='x', pady=(5,10))
+    def _resize_widgets(self):
+        self._resize_job = None
+        w = self.winfo_width() or self.base_width
+        h = self.winfo_height() or self.base_height
+        scale = min(w/self.base_width, h/self.base_height)
+        new_size = max(6, min(int(self.base_font_size * scale), 20))
+        self.ui_style = ("Segoe UI", new_size)
+        # Update CTk widgets
+        for widget in self.control.winfo_children():
+            try: widget.configure(font=self.ui_style)
+            except: pass
+        # Update ttk Treeview
+        self.ttk_style.configure('Treeview', font=(self.ui_font, self.base_font_size), rowheight=new_size*2)
+        self.ttk_style.configure('Treeview.Heading', font=("Segoe UI", new_size//2, 'bold'))
+        # Update listbox
+        self.p_list.config(font=("Segoe UI", new_size))
+        # Update plot fonts
+        if hasattr(self, 'ax'):
+            for txt in [self.ax.title, self.ax.xaxis.label, self.ax.yaxis.label]:
+                txt.set_fontsize(new_size)
+            for lbl in self.ax.get_xticklabels() + self.ax.get_yticklabels():
+                lbl.set_fontsize(new_size)
+            self.canvas.draw()
+
+    def _build_controls(self):
+        ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
+        ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style).pack(fill='x', pady=5)
+        self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w', font=self.ui_style)
+        self.file_lbl.pack(fill='x', pady=5)
+
+        ctk.CTkLabel(self.control, text="2. Choose Header Row", anchor='w', font=self.ui_style).pack(fill='x')
+        self.preview = tk.Frame(self.control, height=180)
+        self.preview.pack(fill='x', pady=5)
         self.preview.pack_propagate(False)
-        self.tree = ttk.Treeview(self.preview, show='headings', height=8, selectmode='browse')
-        vs = ttk.Scrollbar(self.preview, orient=tk.VERTICAL, command=self.tree.yview)
-        hs = ttk.Scrollbar(self.preview, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree = ttk.Treeview(self.preview, show='headings', height=8)
+        vs = ttk.Scrollbar(self.preview, orient='vertical', command=self.tree.yview)
+        hs = ttk.Scrollbar(self.preview, orient='horizontal', command=self.tree.xview)
         self.tree.configure(yscroll=vs.set, xscroll=hs.set)
         self.tree.grid(row=0, column=0, sticky='nsew')
         vs.grid(row=0, column=1, sticky='ns')
@@ -62,74 +110,26 @@ class AlphaAnalysisApp(ctk.CTk):
         self.preview.grid_rowconfigure(0, weight=1)
         self.preview.grid_columnconfigure(0, weight=1)
         self.tree.bind('<<TreeviewSelect>>', self._on_header_select)
-        self.hdr_lbl = ctk.CTkLabel(self.control, text="Header row: None", anchor='w')
-        self.hdr_lbl.pack(fill='x', pady=(0,10))
+        self.hdr_lbl = ctk.CTkLabel(self.control, text="Header row: None", anchor='w', font=self.ui_style)
+        self.hdr_lbl.pack(fill='x', pady=5)
 
-        # Elapsed toggle switch
-        ctk.CTkLabel(self.control, text="Elapsed Time Mode:", anchor='w').pack(fill='x')
-        ctk.CTkSwitch(self.control,
-                      text="Use Elapsed Only",
-                      variable=self.elapsed_mode,
-                      onvalue=True,
-                      offvalue=False).pack(anchor='w', pady=(0,10))
+        ctk.CTkSwitch(self.control, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style).pack(anchor='w', pady=5)
 
-        ctk.CTkLabel(self.control, text="3. Select Time & Pressure Columns", anchor='w').pack(fill='x')
-        ctk.CTkLabel(self.control, text="Time Column:", anchor='w').pack(fill='x')
+        ctk.CTkLabel(self.control, text="3. Select Columns", anchor='w', font=self.ui_style).pack(fill='x')
+        ctk.CTkLabel(self.control, text="Time Column:", anchor='w', font=self.ui_style).pack(fill='x')
         self.time_cb = ttk.Combobox(self.control, state='disabled')
-        self.time_cb.pack(fill='x')
-        self.time_cb.bind('<<ComboboxSelected>>', self._on_time_select)
-        ctk.CTkLabel(self.control, text="Pressure Columns:", anchor='w').pack(fill='x', pady=(10,0))
-        self.p_list = tk.Listbox(self.control, selectmode='multiple', height=5)
-        self.p_list.pack(fill='x')
-        self.p_list.bind('<<ListboxSelect>>', self._on_pressure_select)
+        self.time_cb.pack(fill='x', pady=5)
+        self.time_cb.bind('<<ComboboxSelected>>', lambda e: setattr(self, 'time_col', self.time_cb.get()))
+        ctk.CTkLabel(self.control, text="Pressure Columns:", anchor='w', font=self.ui_style).pack(fill='x')
+        self.p_list = tk.Listbox(self.control, selectmode='multiple', height=5, font=self.ui_style)
+        self.p_list.pack(fill='x', pady=5)
 
-        ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data).pack(fill='x', pady=(10,10))
-        ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor='w').pack(fill='x')
+        ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data_thread, font=self.ui_style).pack(fill='x', pady=5)
+        ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor='w', font=self.ui_style).pack(fill='x')
         self.min_var = tk.DoubleVar(value=30.0)
-        ctk.CTkEntry(self.control, textvariable=self.min_var).pack(fill='x')
 
-        ctk.CTkButton(self.control, text="Confirm Zones", command=self._confirm).pack(fill='x', pady=(10,0))
-
-    def _select_file(self):
-        path = filedialog.askopenfilename(filetypes=[("Excel files","*.xlsx *.xls")])
-        if not path: return
-        self.file_lbl.configure(text=path)
-        df = pd.read_excel(path, nrows=15, header=None)
-        cols = [f"C{c}" for c in range(df.shape[1])]
-        self.tree.config(columns=cols)
-        for c in cols:
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=80, stretch=False)
-        self.tree.delete(*self.tree.get_children())
-        for idx, row in df.iterrows():
-            self.tree.insert('', tk.END, iid=str(idx), values=list(row))
-        self.hdr_lbl.configure(text="Header row: None")
-        self.time_cb.config(state='disabled')
-        self.p_list.delete(0, tk.END)
-        self.header_row = None
-        self.time_col = None
-        self.pressure_cols = []
-
-    def _on_header_select(self, event):
-        sel = self.tree.selection()
-        if not sel: return
-        self.header_row = int(sel[0])
-        self.hdr_lbl.configure(text=f"Header row: {self.header_row+1}")
-        self.path = self.file_lbl.cget('text')
-        try:
-            df = pd.read_excel(self.path, header=self.header_row, nrows=5)
-        except Exception:
-            messagebox.showerror("File Error", "Failed to read the file with selected header row.")
-            return
-        cols = list(df.columns)
-        self.time_cb.config(values=cols, state='readonly')
-        self.time_cb.set("")
-        self.time_col = None
-        self.p_list.delete(0, tk.END)
-        for c in cols:
-            self.p_list.insert(tk.END, c)
-        self.pressure_cols = []
-
+        ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style).pack(fill='x', pady=5)
+        ctk.CTkButton(self.control, text="Confirm Zones", command=self._confirm, font=self.ui_style).pack(fill='x', pady=5)
 
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
@@ -139,84 +139,94 @@ class AlphaAnalysisApp(ctk.CTk):
         self.rs = None
         self.canvas.mpl_connect('button_press_event', self._on_click)
 
-    def _on_resize(self, event):
-        w = self.winfo_width() or self.base_width
-        self.control.config(width=w//4)
-        new_size = max(6, int(self.base_font_size * w / self.base_width))
-        self.ui_font.configure(size=new_size)
+    def _browse_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Excel files","*.xlsx *.xls")])
+        if not path: return
+        self.file_lbl.configure(text=path)
+        df0 = pd.read_excel(path, nrows=15, header=None)
+        cols = [f"C{c}" for c in range(df0.shape[1])]
+        self.tree.config(columns=cols)
+        for c in cols:
+            self.tree.heading(c, text=c); self.tree.column(c, width=80, stretch=False)
+        self.tree.delete(*self.tree.get_children())
+        for idx, row in df0.iterrows():
+            self.tree.insert('', 'end', iid=str(idx), values=list(row))
+        self.hdr_lbl.configure(text="Header row: None")
+        self.time_cb.config(state='disabled'); self.p_list.delete(0, 'end')
 
-    def _on_click(self, event):
-        #Right-click to clear zones only after data is loaded
-        if event.button != 3 or event.inaxes != self.ax or self.df is None:
-            return
-        x = event.xdata
-        for zi, z in enumerate(self.zones):
-            if z['start'] <= x <= z['end']:
-                z['patch'].remove()
-                z['label'].remove()
-                self.zones.pop(zi)
-                break
-        # Renumber zones
-        for idx, z in enumerate(self.zones, 1):
-            z['label'].set_text(str(idx))
-            mid = (z['start'] + z['end']) / 2
-            z['label'].set_x(mid)
-        self.canvas.draw()
-
-
-
-    def _on_time_select(self, event):
-        self.time_col = self.time_cb.get()
-
-    def _on_pressure_select(self, event):
-        self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
-
-    def _load_data(self):
+    def _on_header_select(self, event):
+        sel = self.tree.selection()
+        if not sel: return
+        self.header_row = int(sel[0]); self.hdr_lbl.configure(text=f"Header row: {self.header_row+1}")
+        path = self.file_lbl.cget('text')
         try:
-            df = pd.read_excel(self.path, header=self.header_row)
+            df_headers = pd.read_excel(path, header=self.header_row, nrows=3)
         except Exception:
-            messagebox.showerror("File Error", "Failed to read the file with selected header row.")
+            tkmsg.showerror("Error","Cannot read with header row {i+1}")
             return
-        self.df = df
-        
-        if self.df is None or not self.time_col or not self.pressure_cols:
-            messagebox.showwarning("Incomplete", "Ensure header, time, and pressure columns chosen.")
-            return
+        cols = list(df_headers.columns)
+        self.time_cb.config(values=cols, state='readonly')
+        self.time_col = None
+        self.p_list.delete(0,'end')
+        for c in cols:
+            self.p_list.insert('end', c)
 
-        date_str = simpledialog.askstring("Test Date", "Enter date (YYYY-MM-DD):")
+    def _load_data_thread(self):
+        # start processing thread if you have all the selections needed to plot
+        if self.header_row is None or self.time_col is None or not self.p_list.curselection():
+            tkmsg.showwarning("Incomplete","Select header, time, and pressure columns.")
+            return
+        else:
+            threading.Thread(target=self._process_data, daemon=True).start()
+
+        # ask date in main thread
+        date_str = simpledialog.askstring("Test Date","Enter date (YYYY-MM-DD):")
         if not date_str:
             return
-        try:
-            datetime.strptime(date_str, '%Y-%m-%d')
-        except Exception:
-            messagebox.showerror("Bad Date", "Date must be YYYY-MM-DD.")
+        try: 
+            self.test_date = datetime.strptime(date_str,'%Y-%m-%d')
+        except: 
+            tkmsg.showerror("Bad Date","Date must be YYYY-MM-DD.")
             return
         
+        # collect cols
+        self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
+        self.collected_date = True
+        
+
+    def _process_data(self):
+        # Proces data in a separate thread to avoid blocking the UI
+        path = self.file_lbl.cget('text')
+        parsed_data = pd.read_excel(path, header=self.header_row)
+
+        if parsed_data is None:
+            tkmsg.showwarning("Incomplete","Data Failed to load, cancelling.")
+            return
+        
+        self.df = parsed_data
+
+        while self.collected_date is False:
+            pass
+        self.collected_date = False
+
         if self.elapsed_mode.get():
-            try:
-                self.df[self.time_col] = pd.to_timedelta(int(self.df[self.time_col]))
-            except Exception:
-                messagebox.showerror("Parse Error", "Elapsed time column could not be parsed.")
-                return
+            self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors='coerce')
+            self.df.dropna(subset=[self.time_col], inplace=True)
+            self.elapsed_col = self.time_col
         else:
-            try:
-                self.df['ParsedTime'] = pd.to_datetime(
-                    date_str + ' ' + self.df[self.time_col].astype(str),
-                    format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
-            except Exception:
-                messagebox.showerror("Parse Error", "Time column could not be parsed.")
-                return
-
+            self.df['ParsedTime'] = pd.to_datetime(
+                self.test_date.strftime('%Y-%m-%d') + ' ' + self.df[self.time_col].astype(str),
+                errors='coerce')
             self.df.dropna(subset=['ParsedTime'], inplace=True)
-            if self.df.empty:
-                messagebox.showerror("Parse Error", "No valid times found.")
-                return
+            self.elapsed_col = 'Elapsed'
+            self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
+        self.after(0, self._on_data_ready)
 
-        self.elapsed_col = 'Elapsed'
-        self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
+    def _on_data_ready(self):
         self.zones = []
         self._enable_selector()
         self._redraw()
+        self.rs.set_active(True)
 
     def _enable_selector(self):
         if self.rs:
@@ -236,61 +246,53 @@ class AlphaAnalysisApp(ctk.CTk):
         self.rs.set_active(True)
 
     def _on_select(self, e1, e2):
-        if self.df is None or e1.xdata is None or e2.xdata is None:
-            return
-        x1, x2 = sorted([e1.xdata, e2.xdata])
-        if x2 - x1 < self.min_var.get():
-            return
-        patch = self.ax.axvspan(x1, x2, color='red', alpha=0.3)
-        idx = len(self.zones) + 1
-        y_max = max(self.df[col].max() for col in self.pressure_cols)
-        label = self.ax.text((x1+x2)/2, y_max, str(idx), ha='center', va='top', bbox=dict(fc='yellow'))
-        self.zones.append({'start':x1, 'end':x2, 'patch':patch, 'label':label})
+        x1,x2=sorted([e1.xdata,e2.xdata])
+        if None in (x1,x2) or x2-x1 < self.min_var.get(): return
+        patch=self.ax.axvspan(x1,x2,color='red',alpha=0.3)
+        idx=len(self.zones)+1
+        y_max=max(self.df[c].max() for c in self.pressure_cols)
+        label=self.ax.text((x1+x2)/2,y_max,str(idx),ha='center',bbox=dict(fc='yellow'))
+        self.zones.append({'start':x1,'end':x2,'patch':patch,'label':label})
+        self.canvas.draw()
+
+    def _on_click(self,event):
+        if event.button!=3 or event.inaxes!=self.ax: return
+        x=event.xdata
+        for i,z in enumerate(self.zones):
+            if z['start']<=x<=z['end']:
+                z['patch'].remove(); z['label'].remove(); self.zones.pop(i); break
+        for idx,z in enumerate(self.zones,1):
+            z['label'].set_text(str(idx)); z['label'].set_x((z['start']+z['end'])/2)
         self.canvas.draw()
 
     def _redraw(self):
         self.ax.clear()
-        if self.df is None:
-            self.canvas.draw()
-            return
-        for col in self.pressure_cols:
-            self.ax.plot(self.df[self.elapsed_col], self.df[col], label=col)
-        for idx, z in enumerate(self.zones, 1):
-            patch = self.ax.axvspan(z['start'], z['end'], color='red', alpha=0.3)
-            y_max = max(self.df[col].max() for col in self.pressure_cols)
-            label = self.ax.text((z['start']+z['end'])/2, y_max, str(idx), ha='center', va='top', bbox=dict(fc='yellow'))
-            z['patch'], z['label'] = patch, label
-        self.ax.legend()
+        for c in self.pressure_cols:
+            self.ax.plot(self.df[self.elapsed_col],self.df[c],label=c)
+        for i,z in enumerate(self.zones,1):
+            z['patch']=self.ax.axvspan(z['start'],z['end'],color='red',alpha=0.3)
+            z['label']=self.ax.text((z['start']+z['end'])/2,max(self.df[c].max() for c in self.pressure_cols),str(i),ha='center',bbox=dict(fc='yellow'))
         self.ax.set_xlabel('Elapsed Time [s]')
-        self.ax.grid(True)
+        self.ax.legend(); self.ax.grid(True)
         self.canvas.draw()
 
     def _confirm(self):
+        if not self.zones: tkmsg.showwarning("No zones","Please draw zones first."); return
 
-        # Ensure there are zones to confirm
-        if not self.zones:
-            messagebox.showwarning("No zones selected", "Please create at least one zone before confirming.")
-            return
-        
-        # Prepare zone messages
-        msgs = []
-        for idx, z in enumerate(self.zones, 1):
-            msgs.append(f"Zone {idx}: {z['start']:.2f}s to {z['end']:.2f}s")
-        if not messagebox.askokcancel("Confirm Zones", "\n".join(msgs)): # Stop if user cancels
-            return
+        msgs=[f"Zone {i}: {z['start']:.2f}-{z['end']:.2f}" for i,z in enumerate(self.zones,1)]
+        if not tkmsg.askokcancel("Confirm Zones","\n".join(msgs)): return
 
-        # For each selected zone, create a Toplevel window with embedded plots
         for i, z in enumerate(self.zones, 1):
             start, end = z['start'], z['end']
             zone_df = self.df[(self.df[self.elapsed_col] >= start) & (self.df[self.elapsed_col] <= end)].copy()
             if zone_df.empty:
-                messagebox.showerror("Zone Error", f"Zone {i} is empty.")
+                tkmsg.showerror("Zone Error", f"Zone {i} is empty.")
                 continue
 
             # Create Toplevel window
             win = tk.Toplevel(self)
             win.title(f"Zone {i} Analysis")
-            win.geometry("700x800")
+            win.geometry("700x900")
 
             # Create matplotlib Figure
             fig = plt.Figure(figsize=(6, 8), dpi=100)
@@ -334,11 +336,12 @@ class AlphaAnalysisApp(ctk.CTk):
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _on_closing(self):
-        if messagebox.askokcancel("Quit", "Do you want to quit?"):
-            self.destroy()
+        if self._resize_job:
+            self.after_cancel(self._resize_job)
+            self._resize_job = None
+        if tkmsg.askokcancel("Quit", "Do you really want to quit?"):
             self.quit()
 
-if __name__ == '__main__':
-    app = AlphaAnalysisApp()
-    app.protocol("WM_DELETE_WINDOW", app._on_closing)
+if __name__=='__main__':
+    app=AlphaAnalysisApp() 
     app.mainloop()
