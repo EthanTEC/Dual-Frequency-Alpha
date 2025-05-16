@@ -1,3 +1,30 @@
+"""
+Alpha Analysis GUI
+Author: Ethan Predinchuk
+Date: 2025-05-16
+Version: 1.0
+
+Description: This script provides a GUI for analyzing pressure data from excel 
+files produced by the current "WELL WHISPERER" testing system. It allows users to select
+an excel file, specify the header row, select time and pressure columns for analysis, and visualize the data.
+The GUI also allows users to draw zones on the plot, which specify regions of interest for 
+frequency analysis. A popup window displays the time-domain and frequency-domain plots for each selected zone.
+
+Dependencies:
+- tkinter
+- customtkinter
+- pandas
+- numpy
+- matplotlib
+- threading
+- datetime
+
+NOTE:   This code is designed to be run in a Python environment with the required libraries installed.
+        The code is structured to be modular, with separate functions for each part of the GUI and data processing.
+        There are no external dependencies other than the standard Python libraries and the specified third-party libraries.
+        There is no reason the code shouldn't work for other excel sheets, and should perform in full, but was designed for the "WELL WHISPERER" system.
+"""
+
 import threading
 import tkinter as tk
 import customtkinter as ctk
@@ -9,7 +36,6 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from datetime import datetime
-import tkinter.font as tkfont
 
 # Appearance setup
 ctk.set_appearance_mode('System')
@@ -209,11 +235,12 @@ class AlphaAnalysisApp(ctk.CTk):
             pass
         self.collected_date = False
 
-        if self.elapsed_mode.get():
-            self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors='coerce')
+        if self.elapsed_mode.get(): # Elapsed mode
+            self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors='coerce', downcast='float')
             self.df.dropna(subset=[self.time_col], inplace=True)
             self.elapsed_col = self.time_col
-        else:
+
+        else: # Absolute mode
             self.df['ParsedTime'] = pd.to_datetime(
                 self.test_date.strftime('%Y-%m-%d') + ' ' + self.df[self.time_col].astype(str),
                 errors='coerce')
