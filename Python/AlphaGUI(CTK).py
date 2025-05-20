@@ -47,7 +47,7 @@ class AlphaAnalysisApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Alpha Analysis (Optimized)")
-        self.geometry("1600x900")
+        self.geometry("1200x800")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         # Debounce resize
@@ -55,8 +55,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.bind('<Configure>', self._on_configure)
 
         # Base dimensions for scaling
-        self.base_width = 1600
-        self.base_height = 900
+        self.base_width = 1200
+        self.base_height = 800
         self.base_font_size = 12
         self.ui_font = "Segoe UI"
         self.ui_style = (self.ui_font, self.base_font_size)
@@ -80,10 +80,29 @@ class AlphaAnalysisApp(ctk.CTk):
         # Elapsed switch
         self.elapsed_mode = tk.BooleanVar(value=False)
 
-        # Layout frames
-        self.control = ctk.CTkFrame(self)
-        self.control.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
-        self.control.pack_propagate(False)
+        # Create control frame area with scroll bar
+        self.control_container = ctk.CTkFrame(self)
+        self.control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+        self.control_container.pack_propagate(False)
+
+        self.control_canvas = tk.Canvas(self.control_container, borderwidth=0, highlightthickness=0)
+        self.control_scrollbar = ttk.Scrollbar(self.control_container, orient="vertical", command=self.control_canvas.yview)
+        self.control_canvas.configure(yscrollcommand=self.control_scrollbar.set)
+
+        self.control_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.control = ctk.CTkFrame(self.control_canvas)
+        self.control_window = self.control_canvas.create_window(
+            (0, 0),
+            window=self.control,
+            anchor="nw",
+            width=int(self.winfo_width()*0.8),
+        )
+
+        self.control_canvas.configure(bg=self.control.cget("fg_color")[1])
+        self.control.bind("<Configure>", self._on_control_configure)
+
         self.timePlot = ctk.CTkFrame(self)
         self.timePlot.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
@@ -98,36 +117,6 @@ class AlphaAnalysisApp(ctk.CTk):
         self.current_frame = 0
         self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
         self.finished_loading_event = threading.Event()
-
-
-    def _on_configure(self, event):
-        if self._resize_job:
-            self.after_cancel(self._resize_job)
-        self._resize_job = self.after(200, self._resize_widgets)
-
-    def _resize_widgets(self):
-        self._resize_job = None
-        w = self.winfo_width() or self.base_width
-        h = self.winfo_height() or self.base_height
-        scale = min(w/self.base_width, h/self.base_height)
-        new_size = max(6, min(int(self.base_font_size * scale), 20))
-        self.ui_style = ("Segoe UI", new_size)
-        # Update CTk widgets
-        for widget in self.control.winfo_children():
-            try: widget.configure(font=self.ui_style)
-            except: pass
-        # Update ttk Treeview
-        self.ttk_style.configure('Treeview', font=(self.ui_font, self.base_font_size), rowheight=new_size*2)
-        self.ttk_style.configure('Treeview.Heading', font=("Segoe UI", new_size//2, 'bold'))
-        # Update listbox
-        self.p_list.config(font=("Segoe UI", new_size))
-        # Update plot fonts
-        if hasattr(self, 'ax'):
-            for txt in [self.ax.title, self.ax.xaxis.label, self.ax.yaxis.label]:
-                txt.set_fontsize(new_size)
-            for lbl in self.ax.get_xticklabels() + self.ax.get_yticklabels():
-                lbl.set_fontsize(new_size)
-            self.canvas.draw()
 
     def _build_controls(self):
         # Browse button
@@ -192,6 +181,41 @@ class AlphaAnalysisApp(ctk.CTk):
         NavigationToolbar2Tk(self.canvas, self.timePlot)
         self.rs = None
         self.canvas.mpl_connect('button_press_event', self._on_click)
+
+    def _on_configure(self, event):
+        if self._resize_job:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(200, self._resize_widgets)
+
+    def _resize_widgets(self):
+        self._resize_job = None
+        w = self.winfo_width() or self.base_width
+        h = self.winfo_height() or self.base_height
+        scale = min(w/self.base_width, h/self.base_height)
+        new_size = max(6, min(int(self.base_font_size * scale), 20))
+        self.ui_style = ("Segoe UI", new_size)
+        # Update CTk widgets
+        for widget in self.control.winfo_children():
+            try: widget.configure(font=self.ui_style)
+            except: pass
+        # Update ttk Treeview
+        self.ttk_style.configure('Treeview', font=(self.ui_font, self.base_font_size), rowheight=new_size*2)
+        self.ttk_style.configure('Treeview.Heading', font=("Segoe UI", new_size//2, 'bold'))
+        # Update listbox
+        self.p_list.config(font=("Segoe UI", new_size))
+        # Update plot fonts
+        if hasattr(self, 'ax'):
+            for txt in [self.ax.title, self.ax.xaxis.label, self.ax.yaxis.label]:
+                txt.set_fontsize(new_size)
+            for lbl in self.ax.get_xticklabels() + self.ax.get_yticklabels():
+                lbl.set_fontsize(new_size)
+            self.canvas.draw()
+
+    def _on_control_configure(self, event):
+        """
+        Update the scrollregion of the canvas whenever the control frame is resized.
+        """
+        self.control_canvas.configure(scrollregion=self.control_canvas.bbox("all"))
 
     def _browse_file(self):
         path = filedialog.askopenfilename(filetypes=[("Excel files","*.xlsx *.xls")])
