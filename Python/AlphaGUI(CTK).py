@@ -75,6 +75,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.test_date = None
         self.header_row = None
         self.collected_date_event = threading.Event()
+        self.bad_date_event = threading.Event()
 
         # Elapsed switch
         self.elapsed_mode = tk.BooleanVar(value=False)
@@ -129,11 +130,14 @@ class AlphaAnalysisApp(ctk.CTk):
             self.canvas.draw()
 
     def _build_controls(self):
+        # Browse button
         ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
-        ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style).pack(fill='x', pady=5)
+        self.browse_btn = ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style)
+        self.browse_btn.pack(fill='x', pady=5)
         self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w', font=self.ui_style)
         self.file_lbl.pack(fill='x', pady=5)
 
+        # File preview and header row selection
         ctk.CTkLabel(self.control, text="2. Choose Header Row", anchor='w', font=self.ui_style).pack(fill='x')
         self.preview = tk.Frame(self.control, height=180)
         self.preview.pack(fill='x', pady=5)
@@ -151,23 +155,35 @@ class AlphaAnalysisApp(ctk.CTk):
         self.hdr_lbl = ctk.CTkLabel(self.control, text="Header row: None", anchor='w', font=self.ui_style)
         self.hdr_lbl.pack(fill='x', pady=5)
 
-        ctk.CTkSwitch(self.control, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style).pack(anchor='w', pady=5)
+        # Elapsed time toggle switch
+        self.elapsed_switch = ctk.CTkSwitch(self.control, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style)
+        self.elapsed_switch.pack(anchor='w', pady=5)
 
+        # Dropdown time column selector
         ctk.CTkLabel(self.control, text="3. Select Columns", anchor='w', font=self.ui_style).pack(fill='x')
         ctk.CTkLabel(self.control, text="Time Column:", anchor='w', font=self.ui_style).pack(fill='x')
         self.time_cb = ttk.Combobox(self.control, state='disabled')
         self.time_cb.pack(fill='x', pady=5)
         self.time_cb.bind('<<ComboboxSelected>>', lambda e: setattr(self, 'time_col', self.time_cb.get()))
+
+        # Multiselect pressure columns
         ctk.CTkLabel(self.control, text="Pressure Columns:", anchor='w', font=self.ui_style).pack(fill='x')
         self.p_list = tk.Listbox(self.control, selectmode='multiple', height=5, font=self.ui_style)
         self.p_list.pack(fill='x', pady=5)
 
-        ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data_thread, font=self.ui_style).pack(fill='x', pady=5)
+        # Load and plot button
+        self.load_btn = ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data_thread, font=self.ui_style)
+        self.load_btn.pack(fill='x', pady=5)
+        
+        # Minimum zone size box [TODO: Add autocorrect to 0 when invalid input is entered]
         ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor='w', font=self.ui_style).pack(fill='x')
         self.min_var = tk.DoubleVar(value=30.0)
+        self.min_entry = ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style)
+        self.min_entry.pack(fill='x', pady=5)
 
-        ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style).pack(fill='x', pady=5)
-        ctk.CTkButton(self.control, text="Confirm Zones", command=self._confirm, font=self.ui_style).pack(fill='x', pady=5)
+        # Confirm zones and plot frequency responses button
+        self.confirm_btn = ctk.CTkButton(self.control, text="Confirm Zones", command=self._confirm, font=self.ui_style)
+        self.confirm_btn.pack(fill='x', pady=5)
 
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
@@ -211,24 +227,35 @@ class AlphaAnalysisApp(ctk.CTk):
 
     def _load_data_thread(self):
 
-        # start processing thread if you have all the selections needed to plot
+        # Only start processing thread if you have all the selections needed to plot
         if self.header_row is None or self.time_col is None or not self.p_list.curselection():
             tkmsg.showwarning("Incomplete","Select header, time, and pressure columns.")
             return
-        else:
-        # Process data in a separate thread to avoid blocking the UI
-            self.collected_date_event.clear()
-            threading.Thread(target=self._process_data, daemon=True).start()
-            threading.Thread(target=self._play_loading_gif, daemon=True).start()
+        
+        # Disable control panel while processing data
+        self._disable_controls()
+
+        # Process data and play loading animation in separate threads to avoid blocking the UI
+        self.collected_date_event.clear()
+        self.data_thread = threading.Thread(target=self._process_data, daemon=True).start()
+        self.loading_thread = threading.Thread(target=self._play_loading_gif, daemon=True).start()
 
         # ask date in main thread
         date_str = simpledialog.askstring("Test Date","Enter date (YYYY-MM-DD):")
         if not date_str:
+            self._enable_controls()
+            self.finished_loading_event.set()
+            self.bad_date_event.set()
+            self.collected_date_event.set()
             return
         try: 
             self.test_date = datetime.strptime(date_str,'%Y-%m-%d')
         except: 
             tkmsg.showerror("Bad Date","Date must be YYYY-MM-DD.")
+            self._enable_controls()
+            self.finished_loading_event.set()
+            self.bad_date_event.set()
+            self.collected_date_event.set()
             return
         
         # collect cols
@@ -248,9 +275,14 @@ class AlphaAnalysisApp(ctk.CTk):
             tkmsg.showwarning("Incomplete","Data Failed to load, cancelling.")
             return
         
-        self.df = parsed_data
-
         self.collected_date_event.wait()
+        self.collected_date_event.clear()
+
+        if self.bad_date_event.is_set():
+            self.bad_date_event.clear()
+            return
+
+        self.df = parsed_data
 
         if self.elapsed_mode.get(): # Elapsed mode
             self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors='coerce', downcast='float')
@@ -269,7 +301,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.finished_loading_event.set()
 
     def _on_data_ready(self):
-        self.loading_label.place_forget()
+        self._enable_controls()
         self.zones = []
         self._enable_selector()
         self._redraw()
@@ -400,7 +432,9 @@ class AlphaAnalysisApp(ctk.CTk):
             self.loading_label.config(image=self.loading_gif_frames[self.current_frame])
             if not self.finished_loading_event.is_set():
                 self.loading_label.after(33, self._next_frame) # 33ms delay for GIF frames = 30 fps
-            self.finished_loading_event.clear()
+            else:
+                self.finished_loading_event.clear()
+                self.loading_label.place_forget()
 
     def _play_loading_gif(self):
         if not self.loading_gif_frames:
@@ -409,6 +443,59 @@ class AlphaAnalysisApp(ctk.CTk):
         self.loading_label.lift(self.canvas.get_tk_widget())
         self.loading_label.config(image=self.loading_gif_frames[0])
         self._next_frame()
+
+    def _disable_controls(self):
+        """
+        Disable (grey-out) all interactive widgets in the left-pane,
+        preventing user changes while loading/plotting is in progress.
+        """
+        # Disable each button
+        self.browse_btn.configure(state='disabled')
+        self.load_btn.configure(state='disabled')
+        self.confirm_btn.configure(state='disabled')
+
+        # Disable the Treeview (header selection) via its state method
+        self.tree.state(['disabled'])
+        try:
+            self.tree.unbind('<<TreeviewSelect>>')
+        except Exception:
+            pass
+
+        # Disable the "Use Elapsed Only" switch
+        self.elapsed_switch.configure(state='disabled')
+
+        # Disable ComboBox & Listbox
+        self.time_cb.configure(state='disabled')
+        self.p_list.configure(state='disabled')
+
+        # Disable the min zone size entry
+        self.min_entry.configure(state='disabled')
+
+    def _enable_controls(self):
+        """
+        Re-enable all previously disabled widgets once loading is complete.
+        """
+        # Re‐enable buttons
+        self.browse_btn.configure(state='normal')
+        self.load_btn.configure(state='normal')
+        self.confirm_btn.configure(state='normal')
+
+        # Re‐enable Treeview and re‐bind its event via its state method
+        self.tree.state(['!disabled'])
+        self.tree.bind('<<TreeviewSelect>>', self._on_header_select)
+
+        # Re‐enable the switch
+        self.elapsed_switch.configure(state='normal')
+
+        # Re‐enable ComboBox (only readonly if header was chosen) & Listbox
+        if self.header_row is not None:
+            self.time_cb.configure(state='readonly')
+        else:
+            self.time_cb.configure(state='disabled')
+        self.p_list.configure(state='normal')
+
+        # Re‐enable the min zone size entry
+        self.min_entry.configure(state='normal')
 
     def _on_closing(self):
         if self._resize_job:
