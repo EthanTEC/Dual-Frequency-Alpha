@@ -296,9 +296,10 @@ class AlphaAnalysisApp(ctk.CTk):
             self.df.dropna(subset=['ParsedTime'], inplace=True)
             self.elapsed_col = 'Elapsed'
             self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
+        self.finished_loading_event.set()
         self.after(0, self._on_data_ready)
 
-        self.finished_loading_event.set()
+        
 
     def _on_data_ready(self):
         self._enable_controls()
