@@ -74,7 +74,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.elapsed_col = None
         self.test_date = None
         self.header_row = None
-        self.collected_date = False
+        self.collected_date_event = threading.Event()
 
         # Elapsed switch
         self.elapsed_mode = tk.BooleanVar(value=False)
@@ -215,6 +215,7 @@ class AlphaAnalysisApp(ctk.CTk):
             return
         else:
         # Process data in a separate thread to avoid blocking the UI
+            self.collected_date_event.clear()
             threading.Thread(target=self._process_data, daemon=True).start()
 
         # ask date in main thread
@@ -229,7 +230,7 @@ class AlphaAnalysisApp(ctk.CTk):
         
         # collect cols
         self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
-        self.collected_date = True
+        self.collected_date_event.set()
 
         if self.loading:
             self._play_loading_gif()
@@ -250,9 +251,7 @@ class AlphaAnalysisApp(ctk.CTk):
         
         self.df = parsed_data
 
-        while self.collected_date is False:
-            pass
-        self.collected_date = False
+        self.collected_date_event.wait()
 
         if self.elapsed_mode.get(): # Elapsed mode
             self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors='coerce', downcast='float')
