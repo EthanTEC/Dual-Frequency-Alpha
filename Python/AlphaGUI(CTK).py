@@ -1,31 +1,3 @@
-"""
-Alpha Analysis GUI
-Author: Ethan Predinchuk
-Date: 2025-05-16
-Version: 1.0
-
-Description: This script provides a GUI for analyzing pressure data from excel 
-files produced by the current "WELL WHISPERER" testing system. It allows users to select
-an excel file, specify the header row, select time and pressure columns for analysis, and visualize the data.
-The GUI also allows users to draw zones on the plot, which specify regions of interest for 
-frequency analysis. A popup window displays the time-domain and frequency-domain plots for each selected zone.
-
-Dependencies:
-- tkinter
-- customtkinter
-- pandas
-- numpy
-- matplotlib
-- threading
-- datetime
-- Pillow
-
-NOTE:   This code is designed to be run in a Python environment with the required libraries installed.
-        The code is structured to be modular, with separate functions for each part of the GUI and data processing.
-        There are no external dependencies other than the standard Python libraries and the specified third-party libraries.
-        There is no reason the code shouldn't work for other excel sheets, and should perform in full, but was designed for the "WELL WHISPERER" system.
-"""
-
 import threading
 import tkinter as tk
 import customtkinter as ctk
@@ -34,10 +6,13 @@ from tkinter import messagebox as tkmsg
 import pandas as pd
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from datetime import datetime
 from PIL import Image, ImageTk
+import json
+import textwrap
 
 # Appearance setup
 ctk.set_appearance_mode('System')
@@ -79,6 +54,9 @@ class AlphaAnalysisApp(ctk.CTk):
 
         # Elapsed switch
         self.elapsed_mode = tk.BooleanVar(value=False)
+
+        # Save mode switch
+        self.save_data_mode = tk.BooleanVar(value=False)
 
         # Create control frame area with scroll bar
         self.control_container = ctk.CTkFrame(self)
@@ -155,15 +133,24 @@ class AlphaAnalysisApp(ctk.CTk):
         self.load_btn = ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data_thread, font=self.ui_style)
         self.load_btn.pack(fill='x', pady=5)
         
-        # Minimum zone size box [TODO: Add autocorrect to 0 when invalid input is entered]
+        # Minimum zone size box
         ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor='w', font=self.ui_style).pack(fill='x')
         self.min_var = tk.DoubleVar(value=30.0)
         self.min_entry = ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style)
         self.min_entry.pack(fill='x', pady=5)
 
         # Confirm zones and plot frequency responses button
-        self.confirm_btn = ctk.CTkButton(self.control, text="Confirm Zones", command=self._confirm, font=self.ui_style)
+        self.confirm_btn = ctk.CTkButton(self.control, text="5. Confirm Zones", command=self._confirm, font=self.ui_style)
         self.confirm_btn.pack(fill='x', pady=5)
+
+        # Save options label and toggle
+        ctk.CTkLabel(self.control, text="Save Options", anchor='w', font=self.ui_style).pack(fill='x', pady=(10,0))
+        self.save_data_switch = ctk.CTkSwitch(self.control, text="Save as data", variable=self.save_data_mode, font=self.ui_style)
+        self.save_data_switch.pack(anchor='w', pady=5)
+
+        # Save analysis / data button
+        self.save_btn = ctk.CTkButton(self.control, text="6. Save", command=self._save_analysis, font=self.ui_style)
+        self.save_btn.pack(fill='x', pady=5)
 
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
@@ -173,7 +160,6 @@ class AlphaAnalysisApp(ctk.CTk):
         self.rs = None
         self.canvas.mpl_connect('button_press_event', self._on_click)
         
-
         # Loading Gif holder
         loading_widget = self.canvas.get_tk_widget()
         canvas_bg = loading_widget.cget('bg')
@@ -272,8 +258,8 @@ class AlphaAnalysisApp(ctk.CTk):
 
         # Process data and play loading animation in separate threads to avoid blocking the UI
         self.collected_date_event.clear()
-        self.data_thread = threading.Thread(target=self._process_data, daemon=True).start()
-        self.loading_thread = threading.Thread(target=self._play_loading_gif, daemon=True).start()
+        threading.Thread(target=self._process_data, daemon=True).start()
+        threading.Thread(target=self._play_loading_gif, daemon=True).start()
 
         # ask date in main thread
         date_str = simpledialog.askstring("Test Date","Enter date (YYYY-MM-DD):")
@@ -297,7 +283,6 @@ class AlphaAnalysisApp(ctk.CTk):
         self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
         self.collected_date_event.set()
         
-
     def _process_data(self):
 
         # Flag you are loading data
@@ -333,9 +318,7 @@ class AlphaAnalysisApp(ctk.CTk):
             self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
         self.finished_loading_event.set()
         self.after(0, self._on_data_ready)
-
         
-
     def _on_data_ready(self):
         self._enable_controls()
         self.zones = []
@@ -457,6 +440,138 @@ class AlphaAnalysisApp(ctk.CTk):
             logo_label.place(relx=0, rely=0, anchor='nw')
             logo_label.lift(canvas.get_tk_widget())
 
+    def _save_analysis(self):
+        # Ensure data and zones exist
+        if self.df is None:
+            tkmsg.showwarning("No Data", "Please load data before saving.")
+            return
+        if not self.zones:
+            tkmsg.showwarning("No Zones", "Please draw and confirm zones before saving.")
+            return
+
+        # Ask user for folder and filename
+        folder = filedialog.askdirectory(title="Select Save Folder")
+        if not folder:
+            return
+        filename = simpledialog.askstring("Filename", "Enter filename (without extension):")
+        if not filename:
+            return
+
+        # If saving as data (JSON)
+        if self.save_data_mode.get():
+            save_path = f"{folder}/{filename}.json"
+            try:
+                # Convert DataFrame to JSON
+                df_json = self.df.to_json(orient='split')
+                data_to_save = {
+                    'dataframe': df_json,
+                    'time_col': self.time_col,
+                    'pressure_cols': self.pressure_cols,
+                    'elapsed_col': self.elapsed_col,
+                    'test_date': self.test_date.strftime('%Y-%m-%d') if self.test_date else None,
+                    'header_row': self.header_row,
+                    'zones': [
+                        {'start': z['start'], 'end': z['end']} for z in self.zones
+                    ],
+                    'original_file': self.file_lbl.cget('text')
+                }
+                with open(save_path, 'w') as f:
+                    json.dump(data_to_save, f)
+                tkmsg.showinfo("Saved", f"Data saved to {save_path}")
+            except Exception as e:
+                tkmsg.showerror("Save Error", f"An error occurred while saving data: {e}")
+        else:
+            # Save as report (PDF)
+            save_path = f"{folder}/{filename}.pdf"
+            try:
+                with PdfPages(save_path) as pdf:
+                    # First page: summary with date, original file path, and logo
+                    fig_sum = plt.figure(figsize=(8.27, 11.69))  # A4 size
+                    fig_sum.clf()
+                    # Add logo in upper-right corner
+                    logo = Image.open(self.logo_path)
+                    logo_arr = np.array(logo)
+                    ax_logo = fig_sum.add_axes([0.75, 0.85, 0.2, 0.1], anchor='NE', zorder=1)
+                    ax_logo.imshow(logo_arr)
+                    ax_logo.axis('off')
+
+                    # Prepare wrapped file path
+                    original = self.file_lbl.cget('text')
+                    wrapped_path = '\n'.join(textwrap.wrap(original, width=50))
+
+                    text = []
+                    text.append(f"Alpha Analysis Report")
+                    text.append(f"Date of Test: {self.test_date.strftime('%Y-%m-%d') if self.test_date else 'N/A'}")
+                    text.append(f"Original File:")
+                    text.append(wrapped_path)
+                    text.append(f"Pressure Columns: {', '.join(self.pressure_cols)}")
+                    text.append("\nZone Summary:")
+                    for i, z in enumerate(self.zones, 1):
+                        text.append(f"Zone {i}: {z['start']:.2f}s to {z['end']:.2f}s")
+                    fig_sum.text(0.05, 0.5, '\n'.join(text), ha='left', va='center', fontsize=10)
+                    pdf.savefig(fig_sum)
+                    plt.close(fig_sum)
+
+                    # Overall time plot with highlighted zones
+                    fig_all = plt.figure(figsize=(8.27, 11.69))
+                    ax_all = fig_all.add_subplot(111)
+                    for c in self.pressure_cols:
+                        ax_all.plot(self.df[self.elapsed_col], self.df[c], label=c)
+                    # Highlight zones
+                    for i, z in enumerate(self.zones, 1):
+                        ax_all.axvspan(z['start'], z['end'], color='red', alpha=0.3)
+                        ax_all.text((z['start']+z['end'])/2, max(self.df[c].max() for c in self.pressure_cols)*0.95, str(i), ha='center', va='top', bbox=dict(fc='yellow'))
+                    ax_all.set_title('Overall Time Plot')
+                    ax_all.set_xlabel('Elapsed Time [s]')
+                    ax_all.set_ylabel('Pressure')
+                    ax_all.legend()
+                    ax_all.grid(True)
+                    pdf.savefig(fig_all)
+                    plt.close(fig_all)
+
+                    # Zone-specific plots
+                    for i, z in enumerate(self.zones, 1):
+                        start, end = z['start'], z['end']
+                        zone_df = self.df[(self.df[self.elapsed_col] >= start) & (self.df[self.elapsed_col] <= end)].copy()
+                        if zone_df.empty:
+                            continue
+                        fig_zone = plt.figure(figsize=(8.27, 11.69))
+                        ax_time = fig_zone.add_subplot(211)
+                        ax_fft = fig_zone.add_subplot(212)
+
+                        # Time plot
+                        for col in self.pressure_cols:
+                            ax_time.plot(zone_df[self.elapsed_col], zone_df[col], label=col)
+                        ax_time.set_title(f"Zone {i} Time Series: {start:.2f}s to {end:.2f}s")
+                        ax_time.set_xlabel('Elapsed Time [s]')
+                        ax_time.set_ylabel('Pressure')
+                        ax_time.legend()
+                        ax_time.grid(True)
+
+                        # FFT
+                        dt = np.mean(np.diff(zone_df[self.elapsed_col].values))
+                        for col in self.pressure_cols:
+                            data = zone_df[col].values
+                            data = data - np.mean(data)
+                            N = len(data)
+                            freqs = np.fft.rfftfreq(N, d=dt)
+                            fft_vals = np.abs(np.fft.rfft(data))
+                            fft_vals *= 2 / N
+                            ax_fft.plot(freqs, fft_vals, label=col)
+                        ax_fft.set_title(f"Zone {i} FFT (DC Removed)")
+                        ax_fft.set_xlabel('Frequency [Hz]')
+                        ax_fft.set_ylabel('Amplitude')
+                        ax_fft.legend()
+                        ax_fft.grid(True)
+
+                        fig_zone.tight_layout()
+                        pdf.savefig(fig_zone)
+                        plt.close(fig_zone)
+
+                tkmsg.showinfo("Saved", f"Analysis saved to {save_path}")
+            except Exception as e:
+                tkmsg.showerror("Save Error", f"An error occurred while saving: {e}")
+
     def _get_loading_frames(self):
         gif = Image.open(self.loading_gif_path)
         frames = []
@@ -474,7 +589,7 @@ class AlphaAnalysisApp(ctk.CTk):
             self.current_frame = (self.current_frame + 1) % len(self.loading_gif_frames)
             self.loading_label.config(image=self.loading_gif_frames[self.current_frame])
             if not self.finished_loading_event.is_set():
-                self.loading_label.after(33, self._next_frame) # 33ms delay for GIF frames = 30 fps
+                self.loading_label.after(33, self._next_frame)
             else:
                 self.finished_loading_event.clear()
                 self.loading_label.place_forget()
@@ -496,6 +611,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.browse_btn.configure(state='disabled')
         self.load_btn.configure(state='disabled')
         self.confirm_btn.configure(state='disabled')
+        self.save_btn.configure(state='disabled')
+        self.save_data_switch.configure(state='disabled')
 
         # Disable the Treeview (header selection) via its state method
         self.tree.state(['disabled'])
@@ -522,6 +639,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.browse_btn.configure(state='normal')
         self.load_btn.configure(state='normal')
         self.confirm_btn.configure(state='normal')
+        self.save_btn.configure(state='normal')
+        self.save_data_switch.configure(state='normal')
 
         # Re‐enable Treeview and re‐bind its event via its state method
         self.tree.state(['!disabled'])
