@@ -109,15 +109,6 @@ class AlphaAnalysisApp(ctk.CTk):
         self._build_controls()
         self._build_plot()
 
-        # Loading Gif holder
-        canvas_widget = self.canvas.get_tk_widget()
-        canvas_bg = canvas_widget.cget('bg')
-        self.loading_gif_path = "Images/LoadingGIF.gif"
-        self.loading_gif_frames = []
-        self.current_frame = 0
-        self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
-        self.finished_loading_event = threading.Event()
-
     def _build_controls(self):
         # Browse button
         ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
@@ -181,6 +172,26 @@ class AlphaAnalysisApp(ctk.CTk):
         NavigationToolbar2Tk(self.canvas, self.timePlot)
         self.rs = None
         self.canvas.mpl_connect('button_press_event', self._on_click)
+        
+
+        # Loading Gif holder
+        loading_widget = self.canvas.get_tk_widget()
+        canvas_bg = loading_widget.cget('bg')
+        self.loading_gif_path = "Images/LoadingGIF.gif"
+        self.loading_gif_frames = []
+        self.current_frame = 0
+        self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
+        self.finished_loading_event = threading.Event()
+
+        # Logo display
+        logo_widget = self.canvas.get_tk_widget()
+        canvas_bg = logo_widget.cget('bg')
+        self.logo_path = "Images/TEC.jpg"
+        logo = Image.open(self.logo_path)
+        self.logo = ImageTk.PhotoImage(logo.convert('RGBA'))
+        self.logo_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0, image=self.logo)
+        self.logo_label.place(relx=1, rely=0, anchor='ne')
+        self.logo_label.lift(self.canvas.get_tk_widget())
 
     def _on_configure(self, event):
         if self._resize_job:
@@ -438,6 +449,13 @@ class AlphaAnalysisApp(ctk.CTk):
             toolbar = NavigationToolbar2Tk(canvas, win)
             toolbar.update()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # Logo display
+            logo_widget = canvas.get_tk_widget()
+            canvas_bg = logo_widget.cget('bg')
+            logo_label = tk.Label(win, bd=0, bg=canvas_bg, highlightthickness=0, image=self.logo)
+            logo_label.place(relx=0, rely=0, anchor='nw')
+            logo_label.lift(canvas.get_tk_widget())
 
     def _get_loading_frames(self):
         gif = Image.open(self.loading_gif_path)
