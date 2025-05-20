@@ -96,7 +96,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.loading_gif_frames = []
         self.current_frame = 0
         self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
-        self.loading = False
+        self.finished_loading_event = threading.Event()
+
 
     def _on_configure(self, event):
         if self._resize_job:
@@ -209,6 +210,7 @@ class AlphaAnalysisApp(ctk.CTk):
             self.p_list.insert('end', c)
 
     def _load_data_thread(self):
+
         # start processing thread if you have all the selections needed to plot
         if self.header_row is None or self.time_col is None or not self.p_list.curselection():
             tkmsg.showwarning("Incomplete","Select header, time, and pressure columns.")
@@ -217,6 +219,7 @@ class AlphaAnalysisApp(ctk.CTk):
         # Process data in a separate thread to avoid blocking the UI
             self.collected_date_event.clear()
             threading.Thread(target=self._process_data, daemon=True).start()
+            threading.Thread(target=self._play_loading_gif, daemon=True).start()
 
         # ask date in main thread
         date_str = simpledialog.askstring("Test Date","Enter date (YYYY-MM-DD):")
@@ -231,10 +234,6 @@ class AlphaAnalysisApp(ctk.CTk):
         # collect cols
         self.pressure_cols = [self.p_list.get(i) for i in self.p_list.curselection()]
         self.collected_date_event.set()
-
-        if self.loading:
-            self._play_loading_gif()
-        self.loading = True
         
 
     def _process_data(self):
@@ -267,8 +266,7 @@ class AlphaAnalysisApp(ctk.CTk):
             self.df[self.elapsed_col] = (self.df['ParsedTime'] - self.df['ParsedTime'].iloc[0]).dt.total_seconds()
         self.after(0, self._on_data_ready)
 
-        # Signal you are done loading data
-        self.loading = False
+        self.finished_loading_event.set()
 
     def _on_data_ready(self):
         self.loading_label.place_forget()
@@ -400,8 +398,9 @@ class AlphaAnalysisApp(ctk.CTk):
         if self.loading_gif_frames:
             self.current_frame = (self.current_frame + 1) % len(self.loading_gif_frames)
             self.loading_label.config(image=self.loading_gif_frames[self.current_frame])
-            if self.loading:
+            if not self.finished_loading_event.is_set():
                 self.loading_label.after(33, self._next_frame) # 33ms delay for GIF frames = 30 fps
+            self.finished_loading_event.clear()
 
     def _play_loading_gif(self):
         if not self.loading_gif_frames:
