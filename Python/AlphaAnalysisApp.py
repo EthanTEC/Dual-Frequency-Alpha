@@ -1,5 +1,6 @@
 from threading import Thread, Event
 import tkinter as tk
+from zipfile import ZipFile
 import customtkinter as ctk
 from tkinter import ttk, filedialog, simpledialog
 from tkinter import messagebox as tkmsg
@@ -694,85 +695,74 @@ class AlphaAnalysisApp(ctk.CTk):
             self.quit()
 
     def _check_for_updates(self):
-        """
-        Called when the user clicks “Check for Updates” in the UI.
-        """
         try:
             with urlopen(UPDATE_INFO_URL, timeout=10) as resp:
                 info = load(resp)
-        except (URLError, HTTPError, JSONDecodeError) as e:
+        except Exception as e:
             tkmsg.showerror("Update Error", f"Could not reach update server:\n{e}")
             return
 
         remote_version = info.get("version")
-        download_url   = info.get("url")
+        patch_url      = info.get("patch_url")
         is_exe_build   = info.get("is_exe", False)
 
-        if not remote_version or not download_url:
-            tkmsg.showerror("Update Error", "Malformed update information.")
+        def version_tuple(v): return tuple(int(x) for x in v.split("."))
+
+        if version_tuple(remote_version) <= version_tuple(__version__):
+            tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
             return
 
-        # Simple semantic‐version comparison (e.g. "1.0.1" > "1.0.0")
-        def version_tuple(vstr):
-            return tuple(int(x) for x in vstr.split("."))
-
-        try:
-            if version_tuple(remote_version) <= version_tuple(__version__):
-                tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
-                return
-        except ValueError:
-            # Fallback if version strings aren’t purely numeric
-            if remote_version == __version__:
-                tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
-                return
-
-        if not tkmsg.askyesno(
-            "Update Available",
-            f"A new version ({remote_version}) is available. You have ({__version__}).\n\n"
-            "Do you want to download and install it now?"
-        ):
+        if not tkmsg.askyesno("Update Available",
+                            f"A new version ({remote_version}) is available.  You have ({__version__}).\n\n"
+                            "Do you want to download and install the patch now?"):
             return
 
-        # Download into a temp file
+        # Download patch.zip into a temp file
         try:
-            with urlopen(download_url, timeout=30) as resp:
+            with urlopen(patch_url, timeout=60) as resp:
                 data = resp.read()
-        except (URLError, HTTPError) as e:
-            tkmsg.showerror("Download Error", f"Could not download update:\n{e}")
+        except Exception as e:
+            tkmsg.showerror("Download Error", f"Could not download patch:\n{e}")
             return
 
-        if getattr(sys, "frozen", False) or is_exe_build:
-            # Running as a PyInstaller‐bundled .exe → save new .exe
-            temp_exe = NamedTemporaryFile(delete=False, suffix=".exe")
-            temp_exe.write(data)
-            temp_exe.flush()
-            temp_exe.close()
-            new_path = temp_exe.name
+        # Write patch.zip into a temporary location
+        tmp_patch = NamedTemporaryFile(delete=False, suffix=".zip")
+        tmp_patch.write(data)
+        tmp_patch.flush()
+        tmp_patch.close()
+        patch_path = tmp_patch.name
 
-            tkmsg.showinfo(
-                "Downloaded",
-                "The new executable has been downloaded to:\n\n"
-                f"{new_path}\n\n"
-                "Please close Alpha Analysis and replace the old .exe with this one."
-            )
+        # We assume the user is running a --onedir installation, so __file__ (the path to
+        # the EXE or to the .py script) sits inside a folder we call install_dir.
+        if getattr(sys, "frozen", False):
+            # When frozen, __file__ is like: "C:/…/AlphaAnalysisApp.exe"
+            exe_path = sys.executable
+            install_dir = os.path.abspath(os.path.dirname(exe_path))
         else:
-            # Running from .py source → overwrite this file
-            try:
-                this_file = os.path.realpath(__file__)
-                with open(this_file, "wb") as f:
-                    f.write(data)
-            except Exception as e:
-                tkmsg.showerror("Update Error", f"Could not overwrite script:\n{e}")
-                return
+            # In dev mode, script_dir = ".../Dual-Frequency-Alpha/Python"
+            script_dir = os.path.abspath(os.path.dirname(__file__))
+            install_dir = os.path.abspath(os.path.join(script_dir, os.pardir, "dist", "AlphaAnalysisApp"))
+            # i.e. we assume dev runs from the onedir folder
+        try:
+            # Extract the patch ZIP directly into install_dir, overwriting files
+            with ZipFile(patch_path, 'r') as z:
+                z.extractall(install_dir)
+        except Exception as e:
+            tkmsg.showerror("Patch Error", f"Could not apply patch:\n{e}")
+            return
+        finally:
+            # Remove the temp zip
+            os.remove(patch_path)
 
-            tkmsg.showinfo(
-                "Updated",
-                "Application was successfully updated to version "
-                f"{remote_version}.\n\nRestarting now..."
-            )
-            # Relaunch the newly‐written script
+        tkmsg.showinfo("Updated", f"Application updated to version {remote_version}.\n\n"
+                                "Restarting now...")
+        # Relaunch
+        if getattr(sys, "frozen", False):
+            os.execl(exe_path, exe_path, *sys.argv)
+        else:
+            # Relaunch from source in development:
             python = sys.executable
-            os.execl(python, python, this_file)
+            os.execl(python, python, os.path.join(install_dir, "AlphaAnalysisApp.exe"))
 
     def _check_for_updates_background(self):
         """

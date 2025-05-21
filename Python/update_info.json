@@ -1,7 +1,6 @@
 {
-  "version": "1.0.0",
-
-  "url": "https://github.com/EthanTEC/Dual-Frequency-Alpha/raw/refs/heads/release-version/AlphaAnalysisApp.exe",
-
+  "version": "1.0.1",
+  "patch_url": "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/patches/v1.0.1.zip",
+  "exe_url": "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/release-version/AlphaAnalysisApp.exe",
   "is_exe": true
 }
