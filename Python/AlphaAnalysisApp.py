@@ -22,7 +22,7 @@ from tempfile import NamedTemporaryFile
 # Application version
 __version__ = "1.0.0"
 # URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
-UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/update_info.json"
+UPDATE_INFO_URL = "https://github.com/EthanTEC/Dual-Frequency-Alpha/tree/main/Python/update_info.json"
 
 # Appearance setup
 ctk.set_appearance_mode('System')
