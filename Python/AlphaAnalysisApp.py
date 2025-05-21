@@ -1,4 +1,4 @@
-import threading
+from threading import Thread, Event
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import ttk, filedialog, simpledialog
@@ -11,8 +11,18 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from datetime import datetime
 from PIL import Image, ImageTk
-import json
-import textwrap
+from json import dump, JSONDecodeError, load
+from urllib.request import URLError, HTTPError, urlopen
+import os
+import sys
+import shutil
+from textwrap import wrap
+from tempfile import NamedTemporaryFile
+
+# Application version
+__version__ = "1.0.0"
+# URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
+UPDATE_INFO_URL = "https://yourserver.com/alpha_app/update_info.json"
 
 # Appearance setup
 ctk.set_appearance_mode('System')
@@ -49,8 +59,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.elapsed_col = None
         self.test_date = None
         self.header_row = None
-        self.collected_date_event = threading.Event()
-        self.bad_date_event = threading.Event()
+        self.collected_date_event = Event()
+        self.bad_date_event = Event()
 
         # Elapsed switch
         self.elapsed_mode = tk.BooleanVar(value=False)
@@ -86,6 +96,9 @@ class AlphaAnalysisApp(ctk.CTk):
 
         self._build_controls()
         self._build_plot()
+
+        #Run an update check in the background on startup
+        Thread(target=self._check_for_updates_background, daemon=True).start()
 
     def _build_controls(self):
         # Browse button
@@ -152,6 +165,10 @@ class AlphaAnalysisApp(ctk.CTk):
         self.save_btn = ctk.CTkButton(self.control, text="6. Save", command=self._save_analysis, font=self.ui_style)
         self.save_btn.pack(fill='x', pady=5)
 
+        # Check for updates button
+        self.update_btn = ctk.CTkButton(self.control, text="7. Check for Updates", command=self._check_for_updates, font=self.ui_style)
+        self.update_btn.pack(fill='x', pady=5)
+
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.timePlot)
@@ -167,7 +184,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.loading_gif_frames = []
         self.current_frame = 0
         self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
-        self.finished_loading_event = threading.Event()
+        self.finished_loading_event = Event()
 
         # Logo display
         logo_widget = self.canvas.get_tk_widget()
@@ -258,8 +275,8 @@ class AlphaAnalysisApp(ctk.CTk):
 
         # Process data and play loading animation in separate threads to avoid blocking the UI
         self.collected_date_event.clear()
-        threading.Thread(target=self._process_data, daemon=True).start()
-        threading.Thread(target=self._play_loading_gif, daemon=True).start()
+        Thread(target=self._process_data, daemon=True).start()
+        Thread(target=self._play_loading_gif, daemon=True).start()
 
         # ask date in main thread
         date_str = simpledialog.askstring("Test Date","Enter date (YYYY-MM-DD):")
@@ -476,7 +493,7 @@ class AlphaAnalysisApp(ctk.CTk):
                     'original_file': self.file_lbl.cget('text')
                 }
                 with open(save_path, 'w') as f:
-                    json.dump(data_to_save, f)
+                    dump(data_to_save, f)
                 tkmsg.showinfo("Saved", f"Data saved to {save_path}")
             except Exception as e:
                 tkmsg.showerror("Save Error", f"An error occurred while saving data: {e}")
@@ -497,7 +514,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
                     # Prepare wrapped file path
                     original = self.file_lbl.cget('text')
-                    wrapped_path = '\n'.join(textwrap.wrap(original, width=50))
+                    wrapped_path = '\n'.join(wrap(original, width=50))
 
                     text = []
                     text.append(f"Alpha Analysis Report")
@@ -665,6 +682,127 @@ class AlphaAnalysisApp(ctk.CTk):
             self._resize_job = None
         if tkmsg.askokcancel("Quit", "Do you really want to quit?"):
             self.quit()
+
+    def _check_for_updates(self):
+        """
+        Called when the user clicks “Check for Updates” in the UI.
+        """
+        try:
+            with urlopen(UPDATE_INFO_URL, timeout=10) as resp:
+                info = load(resp)
+        except (URLError, HTTPError, JSONDecodeError) as e:
+            tkmsg.showerror("Update Error", f"Could not reach update server:\n{e}")
+            return
+
+        remote_version = info.get("version")
+        download_url   = info.get("url")
+        is_exe_build   = info.get("is_exe", False)
+
+        if not remote_version or not download_url:
+            tkmsg.showerror("Update Error", "Malformed update information.")
+            return
+
+        # Simple semantic‐version comparison (e.g. "1.0.1" > "1.0.0")
+        def version_tuple(vstr):
+            return tuple(int(x) for x in vstr.split("."))
+
+        try:
+            if version_tuple(remote_version) <= version_tuple(__version__):
+                tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
+                return
+        except ValueError:
+            # Fallback if version strings aren’t purely numeric
+            if remote_version == __version__:
+                tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
+                return
+
+        if not tkmsg.askyesno(
+            "Update Available",
+            f"A new version ({remote_version}) is available. You have ({__version__}).\n\n"
+            "Do you want to download and install it now?"
+        ):
+            return
+
+        # Download into a temp file
+        try:
+            with urlopen(download_url, timeout=30) as resp:
+                data = resp.read()
+        except (URLError, HTTPError) as e:
+            tkmsg.showerror("Download Error", f"Could not download update:\n{e}")
+            return
+
+        if getattr(sys, "frozen", False) or is_exe_build:
+            # Running as a PyInstaller‐bundled .exe → save new .exe
+            temp_exe = NamedTemporaryFile(delete=False, suffix=".exe")
+            temp_exe.write(data)
+            temp_exe.flush()
+            temp_exe.close()
+            new_path = temp_exe.name
+
+            tkmsg.showinfo(
+                "Downloaded",
+                "The new executable has been downloaded to:\n\n"
+                f"{new_path}\n\n"
+                "Please close Alpha Analysis and replace the old .exe with this one."
+            )
+        else:
+            # Running from .py source → overwrite this file
+            try:
+                this_file = os.path.realpath(__file__)
+                with open(this_file, "wb") as f:
+                    f.write(data)
+            except Exception as e:
+                tkmsg.showerror("Update Error", f"Could not overwrite script:\n{e}")
+                return
+
+            tkmsg.showinfo(
+                "Updated",
+                "Application was successfully updated to version "
+                f"{remote_version}.\n\nRestarting now..."
+            )
+            # Relaunch the newly‐written script
+            python = sys.executable
+            os.execl(python, python, this_file)
+
+    def _check_for_updates_background(self):
+        """
+        Run this on startup (daemon thread). If a newer version is found,
+        simply pop up a notification (no blocking) so the user knows.
+        """
+        try:
+            with urlopen(UPDATE_INFO_URL, timeout=10) as resp:
+                info = load(resp)
+        except Exception:
+            return  # silently fail if offline or bad JSON
+
+        remote_version = info.get("version")
+        if not remote_version:
+            return
+
+        def version_tuple(vstr):
+            try:
+                return tuple(int(x) for x in vstr.split("."))
+            except ValueError:
+                return ()
+        try:
+            if version_tuple(remote_version) <= version_tuple(__version__):
+                return
+        except Exception:
+            if remote_version == __version__:
+                return
+
+        # If we reach here, there’s a newer version. Notify but don’t force.
+        def notify():
+            if tkmsg.askyesno(
+                "Update Available",
+                f"A new version ({remote_version}) is available. You have ({__version__}).\n"
+                "Do you want to download it now?"
+            ):
+                self._check_for_updates()
+
+        # Schedule the pop-up on the main thread
+        self.after(1000, notify)
+
 
 if __name__=='__main__':
     app=AlphaAnalysisApp() 
