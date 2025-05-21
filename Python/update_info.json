@@ -1,5 +1,7 @@
 {
   "version": "1.0.0",
-  "url": "https://raw.githubusercontent.com/YourUser/YourRepo/your‐branch/AlphaAnalysisApp.py",
-  "is_exe": false
+
+  "url": "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/release-version/AlphaAnalysisApp.exe",
+
+  "is_exe": true
 }
