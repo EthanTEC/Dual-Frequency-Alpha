@@ -42,7 +42,7 @@ class AlphaAnalysisApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Alpha Analysis (Optimized)")
-        self.geometry("1200x800")
+        self.geometry("1600x900")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         # Debounce resize
@@ -50,8 +50,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.bind('<Configure>', self._on_configure)
 
         # Base dimensions for scaling
-        self.base_width = 1200
-        self.base_height = 800
+        self.base_width = 1600
+        self.base_height = 900
         self.base_font_size = 12
         self.ui_font = "Segoe UI"
         self.ui_style = (self.ui_font, self.base_font_size)
@@ -79,8 +79,8 @@ class AlphaAnalysisApp(ctk.CTk):
         self.save_data_mode = tk.BooleanVar(value=False)
 
         # Create control frame area with scroll bar
-        self.control_container = ctk.CTkFrame(self)
-        self.control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+        self.control_container = ctk.CTkFrame(self, width=250)
+        self.control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
         self.control_container.pack_propagate(False)
 
         self.control_canvas = tk.Canvas(self.control_container, borderwidth=0, highlightthickness=0)
@@ -95,7 +95,7 @@ class AlphaAnalysisApp(ctk.CTk):
             (0, 0),
             window=self.control,
             anchor="nw",
-            width=int(self.winfo_width()*0.8),
+            width=int(self.winfo_width()),
         )
 
         self.control_canvas.configure(bg=self.control.cget("fg_color")[1])
@@ -114,16 +114,16 @@ class AlphaAnalysisApp(ctk.CTk):
         # Browse button
         ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
         self.browse_btn = ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style)
-        self.browse_btn.pack(fill='x', pady=5)
+        self.browse_btn.pack(fill='x', pady=2)
         self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w', font=self.ui_style)
-        self.file_lbl.pack(fill='x', pady=5)
+        self.file_lbl.pack(fill='x', pady=2)
 
         # File preview and header row selection
         ctk.CTkLabel(self.control, text="2. Choose Header Row", anchor='w', font=self.ui_style).pack(fill='x')
         self.preview = tk.Frame(self.control, height=180)
-        self.preview.pack(fill='x', pady=5)
+        self.preview.pack(fill='x', pady=2)
         self.preview.pack_propagate(False)
-        self.tree = ttk.Treeview(self.preview, show='headings', height=8)
+        self.tree = ttk.Treeview(self.preview, show='headings', height=6)
         vs = ttk.Scrollbar(self.preview, orient='vertical', command=self.tree.yview)
         hs = ttk.Scrollbar(self.preview, orient='horizontal', command=self.tree.xview)
         self.tree.configure(yscroll=vs.set, xscroll=hs.set)
@@ -134,50 +134,50 @@ class AlphaAnalysisApp(ctk.CTk):
         self.preview.grid_columnconfigure(0, weight=1)
         self.tree.bind('<<TreeviewSelect>>', self._on_header_select)
         self.hdr_lbl = ctk.CTkLabel(self.control, text="Header row: None", anchor='w', font=self.ui_style)
-        self.hdr_lbl.pack(fill='x', pady=5)
+        self.hdr_lbl.pack(fill='x', pady=2)
 
         # Elapsed time toggle switch
         self.elapsed_switch = ctk.CTkSwitch(self.control, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style)
-        self.elapsed_switch.pack(anchor='w', pady=5)
+        self.elapsed_switch.pack(anchor='w', pady=2)
 
         # Dropdown time column selector
         ctk.CTkLabel(self.control, text="3. Select Columns", anchor='w', font=self.ui_style).pack(fill='x')
         ctk.CTkLabel(self.control, text="Time Column:", anchor='w', font=self.ui_style).pack(fill='x')
         self.time_cb = ttk.Combobox(self.control, state='disabled')
-        self.time_cb.pack(fill='x', pady=5)
+        self.time_cb.pack(fill='x', pady=2)
         self.time_cb.bind('<<ComboboxSelected>>', lambda e: setattr(self, 'time_col', self.time_cb.get()))
 
         # Multiselect pressure columns
         ctk.CTkLabel(self.control, text="Pressure Columns:", anchor='w', font=self.ui_style).pack(fill='x')
         self.p_list = tk.Listbox(self.control, selectmode='multiple', height=5, font=self.ui_style)
-        self.p_list.pack(fill='x', pady=5)
+        self.p_list.pack(fill='x', pady=2)
 
         # Load and plot button
         self.load_btn = ctk.CTkButton(self.control, text="4. Load & Plot", command=self._load_data_thread, font=self.ui_style)
-        self.load_btn.pack(fill='x', pady=5)
+        self.load_btn.pack(fill='x', pady=2)
         
         # Minimum zone size box
         ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor='w', font=self.ui_style).pack(fill='x')
         self.min_var = tk.DoubleVar(value=30.0)
         self.min_entry = ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style)
-        self.min_entry.pack(fill='x', pady=5)
+        self.min_entry.pack(fill='x', pady=2)
 
         # Confirm zones and plot frequency responses button
         self.confirm_btn = ctk.CTkButton(self.control, text="5. Confirm Zones", command=self._confirm, font=self.ui_style)
-        self.confirm_btn.pack(fill='x', pady=5)
+        self.confirm_btn.pack(fill='x', pady=2)
 
         # Save options label and toggle
-        ctk.CTkLabel(self.control, text="Save Options", anchor='w', font=self.ui_style).pack(fill='x', pady=(10,0))
+        ctk.CTkLabel(self.control, text="Save Options", anchor='w', font=self.ui_style).pack(fill='x', pady=2)
         self.save_data_switch = ctk.CTkSwitch(self.control, text="Save as data", variable=self.save_data_mode, font=self.ui_style)
-        self.save_data_switch.pack(anchor='w', pady=5)
+        self.save_data_switch.pack(anchor='w', pady=2)
 
         # Save analysis / data button
         self.save_btn = ctk.CTkButton(self.control, text="6. Save", command=self._save_analysis, font=self.ui_style)
-        self.save_btn.pack(fill='x', pady=5)
+        self.save_btn.pack(fill='x', pady=2)
 
         # Check for updates button
         self.update_btn = ctk.CTkButton(self.control, text="7. Check for Updates", command=self._check_for_updates, font=self.ui_style)
-        self.update_btn.pack(fill='x', pady=5)
+        self.update_btn.pack(fill='x', pady=2)
 
     def _build_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(6,5))
