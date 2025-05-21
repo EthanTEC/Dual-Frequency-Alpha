@@ -188,7 +188,7 @@ class AlphaAnalysisApp(ctk.CTk):
         # Loading Gif holder
         loading_widget = self.canvas.get_tk_widget()
         canvas_bg = loading_widget.cget('bg')
-        self.loading_gif_path = os.path.join(BASE_PATH, "Images", "LoadingGIF.gif")
+        self.loading_gif_path = os.path.join(BASE_PATH, "..\Images", "LoadingGIF.gif")
         self.loading_gif_frames = []
         self.current_frame = 0
         self.loading_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0)
@@ -197,7 +197,7 @@ class AlphaAnalysisApp(ctk.CTk):
         # Logo display
         logo_widget = self.canvas.get_tk_widget()
         canvas_bg = logo_widget.cget('bg')
-        self.logo_path = os.path.join(BASE_PATH, "Images", "TEC.jpg")
+        self.logo_path = os.path.join(BASE_PATH, "..\Images", "TEC.jpg")
         logo = Image.open(self.logo_path)
         self.logo = ImageTk.PhotoImage(logo.convert('RGBA'))
         self.logo_label = tk.Label(self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0, image=self.logo)
