@@ -18,6 +18,7 @@ from zipfile import ZipFile
 from json import dump, load, JSONDecodeError
 from urllib.request import urlopen, URLError, HTTPError
 from tempfile import NamedTemporaryFile
+from textwrap import wrap
 import shutil
 
 # ──────────────────────────────────────────────────────────────────────────────
