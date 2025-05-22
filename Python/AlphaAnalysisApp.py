@@ -695,6 +695,11 @@ class AlphaAnalysisApp(ctk.CTk):
             self.quit()
 
     def _check_for_updates(self):
+        """
+        Called when the user clicks "Check for Updates".
+        Handles both full build and patch-based updates.
+        """
+        # 1) Fetch update_info.json
         try:
             with urlopen(UPDATE_INFO_URL, timeout=10) as resp:
                 info = load(resp)
@@ -702,107 +707,130 @@ class AlphaAnalysisApp(ctk.CTk):
             tkmsg.showerror("Update Error", f"Could not reach update server:\n{e}")
             return
 
-        remote_version = info.get("version")
-        patch_url      = info.get("patch_url")
-        is_exe_build   = info.get("is_exe", False)
+        remote_version = info.get("version", "")
+        full_url       = info.get("full_url", "")
+        patch_url      = info.get("patch_url", "")
+        is_exe         = info.get("is_exe", False)
 
         def version_tuple(v): return tuple(int(x) for x in v.split("."))
 
-        if version_tuple(remote_version) <= version_tuple(__version__):
-            tkmsg.showinfo("Up To Date", f"You already have the latest version ({__version__}).")
-            return
-
-        if not tkmsg.askyesno("Update Available",
-                            f"A new version ({remote_version}) is available.  You have ({__version__}).\n\n"
-                            "Do you want to download and install the patch now?"):
-            return
-
-        # Download patch.zip into a temp file
+        # Compare versions
         try:
-            with urlopen(patch_url, timeout=60) as resp:
+            if version_tuple(remote_version) <= version_tuple(__version__):
+                tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
+                return
+        except:
+            # fallback on simple string compare
+            if remote_version == __version__:
+                tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
+                return
+
+        # New version found
+        choice = tkmsg.askyesnocancel(
+            "Update Available",
+            f"Version {remote_version} is available.  You have {__version__}.\n\n"
+            "Click YES to download a small patch (recommended) if available.\n"
+            "Click NO to download the full installer ZIP instead.\n"
+            "Click CANCEL to skip."
+        )
+        if choice is None:
+            return  # user clicked "Cancel"
+        if choice is True and patch_url:
+            # USER CHOSE PATCH
+            download_url = patch_url
+            update_type = "patch"
+        else:
+            # USER CHOSE FULL (or no patch_url available)
+            download_url = full_url
+            update_type = "full"
+
+        if not download_url:
+            tkmsg.showerror("No Download URL", "No download URL is configured for this update.")
+            return
+
+        # Download the ZIP into a temp file
+        try:
+            with urlopen(download_url, timeout=60) as resp:
                 data = resp.read()
         except Exception as e:
-            tkmsg.showerror("Download Error", f"Could not download patch:\n{e}")
+            tkmsg.showerror("Download Error", f"Could not download update:\n{e}")
             return
 
-        # Write patch.zip into a temporary location
-        tmp_patch = NamedTemporaryFile(delete=False, suffix=".zip")
-        tmp_patch.write(data)
-        tmp_patch.flush()
-        tmp_patch.close()
-        patch_path = tmp_patch.name
+        # Write to a temporary ZIP on disk
+        tmp_zip = NamedTemporaryFile(delete=False, suffix=".zip")
+        tmp_zip.write(data)
+        tmp_zip.flush()
+        tmp_zip.close()
+        zip_path = tmp_zip.name
 
-        # We assume the user is running a --onedir installation, so __file__ (the path to
-        # the EXE or to the .py script) sits inside a folder we call install_dir.
+        # Determine installation directory:
         if getattr(sys, "frozen", False):
-            # When frozen, __file__ is like: "C:/…/AlphaAnalysisApp.exe"
+            # When frozen, the EXE sits inside, say, C:/Program Files/AlphaAnalysisApp/AlphaAnalysisApp.exe
             exe_path = sys.executable
             install_dir = os.path.abspath(os.path.dirname(exe_path))
         else:
-            # In dev mode, script_dir = ".../Dual-Frequency-Alpha/Python"
-            script_dir = os.path.abspath(os.path.dirname(__file__))
-            install_dir = os.path.abspath(os.path.join(script_dir, os.pardir, "dist", "AlphaAnalysisApp"))
-            # i.e. we assume dev runs from the onedir folder
+            # In dev, assume the user is running the onedir under dist/AlphaAnalysisApp/
+            # i.e. Python/AlphaAnalysisApp.py was never installed, so we ask them to pick folder:
+            install_dir = simpledialog.askstring(
+                "Locate Installation",
+                "Enter the full path to your installed AlphaAnalysisApp folder (e.g. C:\\Program Files\\AlphaAnalysisApp):"
+            )
+            if not install_dir or not os.path.isdir(install_dir):
+                tkmsg.showerror("Invalid Folder", "Please select a valid installation folder.")
+                os.remove(zip_path)
+                return
+            exe_path = os.path.join(install_dir, "AlphaAnalysisApp.exe")
+            if not os.path.isfile(exe_path):
+                tkmsg.showerror("Not Installed", "Could not find AlphaAnalysisApp.exe in that folder.")
+                os.remove(zip_path)
+                return
+
         try:
-            # Extract the patch ZIP directly into install_dir, overwriting files
-            with ZipFile(patch_path, 'r') as z:
+            # Extract zip into install_dir, overwriting files
+            with ZipFile(zip_path, 'r') as z:
                 z.extractall(install_dir)
         except Exception as e:
-            tkmsg.showerror("Patch Error", f"Could not apply patch:\n{e}")
+            tkmsg.showerror("Patch Error", f"Could not apply update:\n{e}")
+            os.remove(zip_path)
             return
         finally:
-            # Remove the temp zip
-            os.remove(patch_path)
+            os.remove(zip_path)
 
-        tkmsg.showinfo("Updated", f"Application updated to version {remote_version}.\n\n"
-                                "Restarting now...")
-        # Relaunch
+        tkmsg.showinfo("Updated", f"Application updated to version {remote_version}.\nRestarting now...")
+
+        # Relaunch the exe
         if getattr(sys, "frozen", False):
             os.execl(exe_path, exe_path, *sys.argv)
         else:
-            # Relaunch from source in development:
-            python = sys.executable
-            os.execl(python, python, os.path.join(install_dir, "AlphaAnalysisApp.exe"))
+            # In dev mode, launch the EXE inside the onedir:
+            os.execl(exe_path, exe_path)
 
     def _check_for_updates_background(self):
         """
-        Run this on startup (daemon thread). If a newer version is found,
-        simply pop up a notification (no blocking) so the user knows.
+        Called on startup in a background thread. Just notifies if a newer version exists.
         """
         try:
             with urlopen(UPDATE_INFO_URL, timeout=10) as resp:
                 info = load(resp)
-        except Exception:
-            return  # silently fail if offline or bad JSON
+        except:
+            return  # ignore offline or invalid JSON
 
-        remote_version = info.get("version")
-        if not remote_version:
-            return
-
-        def version_tuple(vstr):
-            try:
-                return tuple(int(x) for x in vstr.split("."))
-            except ValueError:
-                return ()
+        remote_version = info.get("version", "")
         try:
-            if version_tuple(remote_version) <= version_tuple(__version__):
+            if tuple(int(x) for x in remote_version.split(".")) <= tuple(int(x) for x in __version__.split(".")):
                 return
-        except Exception:
+        except:
             if remote_version == __version__:
                 return
 
-        # If we reach here, there’s a newer version. Notify but don’t force.
         def notify():
             if tkmsg.askyesno(
                 "Update Available",
-                f"A new version ({remote_version}) is available. You have ({__version__}).\n"
-                "Do you want to download it now?"
+                f"A new version {remote_version} is available. You have {__version__}.\n"
+                "Click Yes to download."
             ):
                 self._check_for_updates()
-
-        # Schedule the pop-up on the main thread
         self.after(1000, notify)
-
 
 if __name__=='__main__':
     app=AlphaAnalysisApp() 
