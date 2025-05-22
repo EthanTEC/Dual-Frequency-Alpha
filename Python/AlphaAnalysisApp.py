@@ -21,7 +21,7 @@ from textwrap import wrap
 from tempfile import NamedTemporaryFile
 
 # Application version
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 # URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/refs/heads/main/Python/update_info.json"
 
@@ -113,7 +113,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
     def _build_controls(self):
         # Browse button
-        ctk.CTkLabel(self.control, text="1. Select Excel File TYPO", anchor='w', font=self.ui_style).pack(fill='x')
+        ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
         self.browse_btn = ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style)
         self.browse_btn.pack(fill='x', pady=2)
         self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w', font=self.ui_style)
