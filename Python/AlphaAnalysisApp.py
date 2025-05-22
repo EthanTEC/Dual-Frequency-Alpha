@@ -21,7 +21,7 @@ from textwrap import wrap
 from tempfile import NamedTemporaryFile
 
 # Application version
-__version__ = "1.0.1"
+__version__ = "1.0.0"
 # URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/refs/heads/main/Python/update_info.json"
 
@@ -113,7 +113,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
     def _build_controls(self):
         # Browse button
-        ctk.CTkLabel(self.control, text="1. Select Excel File", anchor='w', font=self.ui_style).pack(fill='x')
+        ctk.CTkLabel(self.control, text="1. Select Excel File TYPO", anchor='w', font=self.ui_style).pack(fill='x')
         self.browse_btn = ctk.CTkButton(self.control, text="Browse...", command=self._browse_file, font=self.ui_style)
         self.browse_btn.pack(fill='x', pady=2)
         self.file_lbl = ctk.CTkLabel(self.control, text="No file chosen", wraplength=280, anchor='w', font=self.ui_style)
@@ -765,13 +765,12 @@ class AlphaAnalysisApp(ctk.CTk):
 
         # Determine installation directory:
         if getattr(sys, "frozen", False):
-            # When frozen, the EXE sits inside, say, C:/Program Files/AlphaAnalysisApp/AlphaAnalysisApp.exe
+            # Running from a bundled EXE: install_dir is the folder containing that EXE
             exe_path = sys.executable
             install_dir = os.path.abspath(os.path.dirname(exe_path))
         else:
-            # In dev, assume the user is running the onedir under dist/AlphaAnalysisApp/
-            # i.e. Python/AlphaAnalysisApp.py was never installed, so we ask them to pick folder:
-            install_dir = filedialog.askdirectory(title="Select Save Folder")
+            # In dev mode, ask user where they installed the onedir
+            install_dir = filedialog.askdirectory(title="Select Installation Folder")
             if not install_dir or not os.path.isdir(install_dir):
                 tkmsg.showerror("Invalid Folder", "Please select a valid installation folder.")
                 os.remove(zip_path)
@@ -781,16 +780,27 @@ class AlphaAnalysisApp(ctk.CTk):
                 tkmsg.showerror("Not Installed", "Could not find AlphaAnalysisApp.exe in that folder.")
                 os.remove(zip_path)
                 return
+
+        # Build path to _internal
+        internal_dir = os.path.join(install_dir, "_internal")
         try:
-            # Extract zip into install_dir, overwriting files
+            # Ensure _internal exists
+            if not os.path.isdir(internal_dir):
+                os.makedirs(internal_dir)
+
+            # Extract the patch (or full) ZIP directly into _internal/
             with ZipFile(zip_path, 'r') as z:
-                z.extractall(install_dir)
+                z.extractall(internal_dir)
+
         except Exception as e:
             tkmsg.showerror("Patch Error", f"Could not apply update:\n{e}")
-            os.remove(zip_path)
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
             return
         finally:
-            os.remove(zip_path)
+            # Delete the downloaded ZIP
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
 
         tkmsg.showinfo("Updated", f"Application updated to version {remote_version}.\nRestarting now...")
 
@@ -798,7 +808,6 @@ class AlphaAnalysisApp(ctk.CTk):
         if getattr(sys, "frozen", False):
             os.execl(exe_path, exe_path, *sys.argv)
         else:
-            # In dev mode, launch the EXE inside the onedir:
             os.execl(exe_path, exe_path)
 
     def _check_for_updates_background(self):
