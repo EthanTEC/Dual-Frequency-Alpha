@@ -24,7 +24,7 @@ import shutil
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) VERSION AND UPDATE_INFO_URL
 # ──────────────────────────────────────────────────────────────────────────────
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/Python/update_info.json"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -727,7 +727,7 @@ class AlphaAnalysisApp(ctk.CTk):
             tkmsg.showerror("Not Installed", "This update mechanism only works in the bundled EXE.")
             return
 
-        new_exe_path = os.path.join(install_dir, "AlphaAnalysisApp_new.exe")
+        new_exe_path = os.path.join(install_dir, f"AlphaAnalysisApp_{remote_version}.exe")
 
         try:
             with urlopen(download_url, timeout=60) as resp:
