@@ -21,7 +21,7 @@ from textwrap import wrap
 from tempfile import NamedTemporaryFile
 
 # Application version
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 # URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/refs/heads/main/Python/update_info.json"
 
