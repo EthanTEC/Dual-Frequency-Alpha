@@ -145,7 +145,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.file_lbl.pack(fill="x", pady=2)
 
         # 2) Header row selector
-        ctk.CTkLabel(self.control, text="2. Choose Header Row", anchor="w", font=self.ui_style).pack(fill="x")
+        ctk.CTkLabel(self.control, text="2. Select Header Row", anchor="w", font=self.ui_style).pack(fill="x")
         self.preview = tk.Frame(self.control, height=180)
         self.preview.pack(fill="x", pady=2)
         self.preview.pack_propagate(False)
