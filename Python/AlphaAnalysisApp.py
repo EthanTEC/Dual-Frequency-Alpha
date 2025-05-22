@@ -21,7 +21,7 @@ from textwrap import wrap
 from tempfile import NamedTemporaryFile
 
 # Application version
-__version__ = "1.0.1"
+__version__ = "1.0.0"
 # URL where the current version info is stored (should return JSON with {'version': 'x.y.z', 'url': 'http://.../AlphaAnalysisApp.py'})
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/refs/heads/main/Python/update_info.json"
 
@@ -771,10 +771,7 @@ class AlphaAnalysisApp(ctk.CTk):
         else:
             # In dev, assume the user is running the onedir under dist/AlphaAnalysisApp/
             # i.e. Python/AlphaAnalysisApp.py was never installed, so we ask them to pick folder:
-            install_dir = simpledialog.askstring(
-                "Locate Installation",
-                "Enter the full path to your installed AlphaAnalysisApp folder (e.g. C:\\Program Files\\AlphaAnalysisApp):"
-            )
+            install_dir = filedialog.askdirectory(title="Select Save Folder")
             if not install_dir or not os.path.isdir(install_dir):
                 tkmsg.showerror("Invalid Folder", "Please select a valid installation folder.")
                 os.remove(zip_path)
