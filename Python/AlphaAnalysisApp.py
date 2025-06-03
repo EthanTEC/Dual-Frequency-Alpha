@@ -18,7 +18,7 @@ from json import load
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) VERSION AND UPDATE_INFO_URL
 # ──────────────────────────────────────────────────────────────────────────────
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/Python/update_info.json"
 
 def try_delete_old_exe():
@@ -468,8 +468,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
         if self.elapsed_mode.get():
             # Use numeric elapsed directly
-            self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors="coerce", downcast="float")
-            self.df.dropna(subset=[self.time_col], inplace=True)
+            self.df[self.time_col] = pd.to_numeric(self.df[self.time_col], errors="coerce")
             self.elapsed_col = self.time_col
         else:
             # Parse absolute time: combine test_date + time strings
@@ -498,7 +497,6 @@ class AlphaAnalysisApp(ctk.CTk):
         self.zones = []
         self._enable_selector()
         self._redraw()
-        self.rs.set_active(True)
 
     def _enable_selector(self):
         """
