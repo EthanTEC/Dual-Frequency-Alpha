@@ -1,3 +1,5 @@
+OUTDATED: NEEDS UPDATING
+
 How to create a patch:
 Ensure the UPDATE_INFO_URL is pointed to the raw update_info.json string kept in main, this will house your version and direct the updater to the correct patch
 Ensure any changes made to the python file have been pushed (doesn't effect the patch creation process just good practice)
@@ -10,3 +12,7 @@ Publish the release and copy the URL of the release to your clipboard (Something
 Paste the new link into update_info.json under "patch_url" so the code knows where to find the most recent patch
 Push this so the hosting link saved in the python code now sees the new patch url
 Now when a user opens the app or presses "Check for Updates" the app will check the json for the location of the most recent patch, compare version with it, and if the app is on an older verions, replace its outdated files with the ones contained in the patch folder
+
+
+THIS CALL MAKES THE EXECUTABLE WE ARE USING NOW (from repo folder):
+pyinstaller --noconfirm --onefile --windowed --add-data "Images;Images" Python/AlphaAnalysisApp.py
