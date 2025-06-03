@@ -18,7 +18,7 @@ from json import load
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) VERSION AND UPDATE_INFO_URL
 # ──────────────────────────────────────────────────────────────────────────────
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/Python/update_info.json"
 
 def try_delete_old_exe():
@@ -132,6 +132,7 @@ class AlphaAnalysisApp(ctk.CTk):
 
         self._build_controls()
         self._build_plot()
+        self._check_for_updates(autoUpdating=True)
 
     def _build_controls(self):
         """
@@ -871,7 +872,7 @@ class AlphaAnalysisApp(ctk.CTk):
     # ────────────────────────────────────────────────────────────────────────────
     # 7) UPDATE MECHANISM (full-installer behavior)
     # ────────────────────────────────────────────────────────────────────────────
-    def _check_for_updates(self):
+    def _check_for_updates(self, autoUpdating = False):
         """
         Fetch update_info.json from remote, compare versions, and if newer,
         download and launch new installer.
@@ -897,11 +898,13 @@ class AlphaAnalysisApp(ctk.CTk):
 
         try:
             if version_tuple(remote_version) <= version_tuple(__version__):
-                tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
+                if not autoUpdating:
+                    tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
                 return
         except Exception:
             if remote_version == __version__:
-                tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
+                if not autoUpdating:
+                    tkmsg.showinfo("Up To Date", f"You already have version {__version__}.")
                 return
 
         if not tkmsg.askyesno(
@@ -936,8 +939,8 @@ class AlphaAnalysisApp(ctk.CTk):
             os.startfile(f'"{new_exe_path}" --replace-old "{old_exe}"')
         except Exception:
             try:
-                import subprocess
-                subprocess.Popen([new_exe_path, "--replace-old", old_exe])
+                from subprocess import Popen
+                Popen([new_exe_path, "--replace-old", old_exe])
             except Exception as e:
                 tkmsg.showerror("Launch Error", f"Could not launch new installer:\n{e}")
                 return
