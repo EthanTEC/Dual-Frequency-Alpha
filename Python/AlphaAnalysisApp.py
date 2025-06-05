@@ -18,7 +18,7 @@ from json import load
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) VERSION AND UPDATE_INFO_URL
 # ──────────────────────────────────────────────────────────────────────────────
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/Python/update_info.json"
 
 def try_delete_old_exe():
@@ -227,6 +227,15 @@ class AlphaAnalysisApp(ctk.CTk):
             self.control, text="7. Check for Updates", command=self._check_for_updates, font=self.ui_style
         )
         self.update_btn.pack(fill="x", pady=2)
+
+        # --- Section 8: Export drawn zones as separate Parquet files ---
+        self.export_zones_btn = ctk.CTkButton(
+            self.control,
+            text="8. Export Zones to Parquet",
+            command=self._export_zones,
+            font=self.ui_style
+        )
+        self.export_zones_btn.pack(fill="x", pady=2)
 
     def _build_plot(self):
         """
@@ -775,6 +784,49 @@ class AlphaAnalysisApp(ctk.CTk):
                 tkmsg.showinfo("Saved", f"Analysis saved to {save_path}")
             except Exception as e:
                 tkmsg.showerror("Save Error", f"An error occurred while saving: {e}")
+
+    def _export_zones(self):
+        """
+        Export each drawn zone into its own Parquet file.
+        Prompts for a folder, then writes zone_1.parquet, zone_2.parquet, etc.
+        """
+        if self.df is None or not self.zones:
+            tkmsg.showwarning("Nothing to Export", "Load data and draw zones first.")
+            return
+
+        # Ask the user for a directory in which to save each zone
+        folder = filedialog.askdirectory(title="Select Folder to Save Zones")
+        if not folder:
+            return  # user canceled
+
+        count = 0
+        for i, z in enumerate(self.zones, start=1):
+            start, end = z["start"], z["end"]
+            # Slice out the DataFrame rows where elapsed_col ∈ [start, end]
+            zone_df = self.df[
+                (self.df[self.elapsed_col] >= start) &
+                (self.df[self.elapsed_col] <= end)
+            ].copy()
+
+            if zone_df.empty:
+                continue
+
+            # Construct a filename: zone_1.parquet, zone_2.parquet, ...
+            out_path = os.path.join(folder, f"zone_{i}.parquet")
+            try:
+                zone_df.to_parquet(out_path, index=False)
+                count += 1
+            except Exception as e:
+                tkmsg.showerror(
+                    "Export Error",
+                    f"Could not save zone {i} to Parquet:\n{e}"
+                )
+                return
+
+        tkmsg.showinfo(
+            "Export Complete",
+            f"Successfully exported {count} zone(s) to:\n{folder}"
+        )
 
     def _get_loading_frames(self):
         """
