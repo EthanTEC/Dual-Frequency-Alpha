@@ -16,9 +16,9 @@ from datetime import datetime
 from json import load
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1) VERSION AND UPDATE_INFO_URL
+# 1) VERSION AND UPDATE_INFO_URL (DEPRECATED)
 # ──────────────────────────────────────────────────────────────────────────────
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 UPDATE_INFO_URL = "https://raw.githubusercontent.com/EthanTEC/Dual-Frequency-Alpha/main/Python/update_info.json"
 
 def try_delete_old_exe():
@@ -39,8 +39,8 @@ def try_delete_old_exe():
                 pass
             del sys.argv[idx: idx + 2]
 
-# Always attempt to delete old EXE before anything else
-try_delete_old_exe()
+# Always attempt to delete old EXE before anything else (COMMENT BACK IN TO REINITIALIZE INSTALLER)
+# try_delete_old_exe()
 
 # Determine BASE_PATH for bundled executable (PyInstaller) or dev environment
 if getattr(sys, "frozen", False):
@@ -49,6 +49,14 @@ else:
     script_dir = os.path.abspath(os.path.dirname(__file__))
     BASE_PATH = os.path.abspath(os.path.join(script_dir, os.pardir))
 
+
+# Enable high-DPI awareness on Windows
+try:
+    if sys.platform.startswith('win'):
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
 
 class AlphaAnalysisApp(ctk.CTk):
     """
@@ -68,71 +76,78 @@ class AlphaAnalysisApp(ctk.CTk):
         and set up internal state.
         """
         super().__init__()
-        self.title("Alpha Analysis (Optimized)")
-        self.geometry("1600x900")
-        self.protocol("WM_DELETE_WINDOW", self._on_closing)
-
-        # Debounce for window resize
-        self._resize_job = None
-        self.bind("<Configure>", self._on_configure)
+        self.title("")
 
         # Base dimensions for font scaling
         self.base_width = 1600
         self.base_height = 900
         self.base_font_size = 12
         self.ui_font = "Segoe UI"
-        self.ui_style = (self.ui_font, self.base_font_size)
+        self._setup_scaling()
 
-        # Style for Treeview control
-        self.ttk_style = ttk.Style(self)
-        self.ttk_style.configure(
-            "Treeview", font=(self.ui_font, self.base_font_size), rowheight=self.base_font_size * 2
-        )
-        self.ttk_style.configure(
-            "Treeview.Heading", font=("Segoe UI", self.base_font_size // 2, "bold")
-        )
+        # Configure grid: controls panel (col 0), plot area (col 1)
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        # Internal state placeholders
-        self.df = None                  # Loaded DataFrame
-        self.zones = []                 # List of dicts: {start, end, patch, label}
-        self.time_col = None            # Name of time column (string)
-        self.pressure_cols = []         # List of selected pressure column names
-        self.elapsed_col = None         # Name of computed elapsed-time column
-        self.test_date = None           # datetime object for reference date
-        self.header_row = None          # Header row index when reading Excel
+        # Containers
+        self.control_container = ctk.CTkFrame(self)
+        self.control_container.grid(row=0, column=0, sticky="ns")
+        self.control_container.grid_propagate(False)
+
+        self.plot_container = ctk.CTkFrame(self)
+        self.plot_container.grid(row=0, column=1, sticky="nsew")
+
+        # Scrollable controls
+        self._setup_control_canvas()
+
+        # Internal state
+        self.df = None
+        self.zones = []
+        self.time_col = None
+        self.pressure_cols = []
+        self.elapsed_col = None
+        self.test_date = None
+        self.header_row = None
         self.collected_date_event = threading.Event()
         self.bad_date_event = threading.Event()
+        self.elapsed_mode = tk.BooleanVar(value=False)
+        self.save_data_mode = tk.BooleanVar(value=False)
 
-        # Mode toggles
-        self.elapsed_mode = tk.BooleanVar(value=False)   # Use numeric elapsed only
-        self.save_data_mode = tk.BooleanVar(value=False) # Save as Parquet vs. PDF
-
-        # Build UI: control panel on left, plot area on right
-        self.control_container = ctk.CTkFrame(self, width=int(self.winfo_width())*1.2)
-        self.control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
-        self.control_container.pack_propagate(False)
-
-        self.control_canvas = tk.Canvas(self.control_container, borderwidth=0, highlightthickness=0)
-        self.control_scrollbar = ttk.Scrollbar(
-            self.control_container, orient="vertical", command=self.control_canvas.yview
-        )
-        self.control_canvas.configure(yscrollcommand=self.control_scrollbar.set)
-        self.control_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.control = ctk.CTkFrame(self.control_canvas)
-        self.control_window = self.control_canvas.create_window(
-            (0, 0), window=self.control, anchor="nw", width=int(self.winfo_width())
-        )
-        self.control_canvas.configure(bg=self.control.cget("fg_color")[1])
-        self.control.bind("<Configure>", self._on_control_configure)
-
-        self.timePlot = ctk.CTkFrame(self)
-        self.timePlot.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
+        # Build UI
         self._build_controls()
         self._build_plot()
-        self._check_for_updates(autoUpdating=True)
+
+        # Resize debounce
+        self._resize_job = None
+        self.bind("<Configure>", self._on_configure)
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
+        # Comment back in to reinitialize autoupdate check at the start of the program
+        # self._check_for_updates(autoUpdating=True)
+
+    def _setup_scaling(self):
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        scale = min(screen_w / self.base_width, screen_h / self.base_height)
+        self.tk.call('tk', 'scaling', scale)
+        new_size = max(6, min(int(self.base_font_size * scale), 20))
+        self.ui_style = (self.ui_font, new_size)
+
+    def _setup_control_canvas(self):
+        self.control_canvas = tk.Canvas(self.control_container, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.control_container, orient="vertical", command=self.control_canvas.yview)
+        self.control_frame = ctk.CTkFrame(self.control_canvas)
+
+        self.control_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.control_canvas.grid(row=0, column=0, sticky="nsew")
+        self.control_container.grid_rowconfigure(0, weight=1)
+        self.control_container.grid_columnconfigure(0, weight=1)
+
+        self.control_window = self.control_canvas.create_window((0, 0), window=self.control_frame, anchor="nw")
+        self.control_frame.bind("<Configure>", 
+                                lambda e: self.control_canvas.configure(scrollregion=self.control_canvas.bbox("all")))
 
     def _build_controls(self):
         """
@@ -142,27 +157,30 @@ class AlphaAnalysisApp(ctk.CTk):
           3) Dropdowns/listboxes to select time and pressure columns.
           4) Controls for minimum zone size, confirm zones, save options, and update check.
         """
-        # --- Section 1: Load Data ---
-        ctk.CTkLabel(self.control, text="1. Load Data", anchor="w", font=self.ui_style).pack(fill="x", pady=(5, 2))
+        cf = self.control_frame
+        cf.grid_columnconfigure(0, weight=1)
+        r = 0
 
-        # Button: browse Excel
-        self.browse_btn = ctk.CTkButton(
-            self.control, text="Browse Excel/Parquet...", command=self._browse_file, font=self.ui_style
-        )
-        self.browse_btn.pack(fill="x", pady=2)
+        # 1. Load Data
+        ctk.CTkLabel(cf, text="1. Load Data", font=self.ui_style).grid(row=r, column=0, sticky="w", pady=(5,2))
+        r+=1
+        self.browse_btn = ctk.CTkButton(cf, text="Browse Excel/Parquet...", command=self._browse_file, font=self.ui_style)
+        self.browse_btn.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
+        self.file_lbl = ctk.CTkLabel(cf, text="No file chosen", wraplength=200, font=self.ui_style)
+        self.file_lbl.grid(row=r, column=0, sticky="w", pady=2)
+        r+=1
 
-        self.file_lbl = ctk.CTkLabel(
-            self.control, text="No file chosen", wraplength=int(self.winfo_width()), anchor="w", font=self.ui_style
-        )
-        self.file_lbl.pack(fill="x", pady=2)
-
-        # --- Section 2: Header row selection (Excel only) ---
-        self.hdr_lbl = ctk.CTkLabel(self.control, text="Header row: None", anchor="w", font=self.ui_style)
-        self.hdr_lbl.pack(fill="x", pady=2)
-
-        self.preview = tk.Frame(self.control, height=150)
-        self.preview.pack(fill="x", pady=2)
-        self.preview.pack_propagate(False)
+        # 2. Header Selection
+        self.hdr_lbl = ctk.CTkLabel(cf, text="Header row: None", font=self.ui_style)
+        self.hdr_lbl.grid(row=r, column=0, sticky="w", pady=2)
+        self.hdr_lbl.grid_remove()  # hide initially
+        r+=1
+        self.preview = tk.Frame(cf, height=150)
+        self.preview.grid(row=r, column=0, sticky="ew", pady=2)
+        self.preview.grid_propagate(False)
+        self.preview.grid_remove()  # hide initially
+        r+=1
         self.tree = ttk.Treeview(self.preview, show="headings", height=5)
         vs = ttk.Scrollbar(self.preview, orient="vertical", command=self.tree.yview)
         hs = ttk.Scrollbar(self.preview, orient="horizontal", command=self.tree.xview)
@@ -173,83 +191,79 @@ class AlphaAnalysisApp(ctk.CTk):
         self.preview.grid_rowconfigure(0, weight=1)
         self.preview.grid_columnconfigure(0, weight=1)
         self.tree.bind("<<TreeviewSelect>>", self._on_header_select)
+        r+=0  # keep r same until switch placed
 
-        # Elapsed mode toggle
-        self.elapsed_switch = ctk.CTkSwitch(
-            self.control, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style
-        )
-        self.elapsed_switch.pack(anchor="w", pady=2)
+        # Elapsed switch
+        self.elapsed_switch = ctk.CTkSwitch(cf, text="Use Elapsed Only", variable=self.elapsed_mode, font=self.ui_style)
+        self.elapsed_switch.grid(row=r, column=0, sticky="w", pady=2)
+        r+=1
 
-        # --- Section 3: Column selectors (Excel or Parquet) ---
-        ctk.CTkLabel(self.control, text="3. Select Columns", anchor="w", font=self.ui_style).pack(fill="x")
-        ctk.CTkLabel(self.control, text="Time Column:", anchor="w", font=self.ui_style).pack(fill="x")
-        self.time_cb = ttk.Combobox(self.control, state="disabled")
-        self.time_cb.pack(fill="x", pady=2)
-        self.time_cb.bind("<<ComboboxSelected>>", lambda e: setattr(self, "time_col", self.time_cb.get()))
+        # 3. Select Columns
+        ctk.CTkLabel(cf, text="3. Select Columns", font=self.ui_style).grid(row=r, column=0, sticky="w")
+        r+=1
+        ctk.CTkLabel(cf, text="Time Column:", font=self.ui_style).grid(row=r, column=0, sticky="w")
+        r+=1
+        self.time_cb = ttk.Combobox(cf, state="disabled")
+        self.time_cb.grid(row=r, column=0, sticky="ew", pady=2)
+        self.time_cb.bind("<<ComboboxSelected>>", lambda e: setattr(self, 'time_col', self.time_cb.get()))
+        r+=1
+        ctk.CTkLabel(cf, text="Pressure Columns:", font=self.ui_style).grid(row=r, column=0, sticky="w")
+        r+=1
+        self.p_list = tk.Listbox(cf, selectmode="multiple", height=4, font=self.ui_style)
+        self.p_list.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
 
-        ctk.CTkLabel(self.control, text="Pressure Columns:", anchor="w", font=self.ui_style).pack(fill="x")
-        self.p_list = tk.Listbox(self.control, selectmode="multiple", height=4, font=self.ui_style)
-        self.p_list.pack(fill="x", pady=2)
-
-        # --- Section 4: Load & Plot (Excel only) ---
-        self.load_btn = ctk.CTkButton(
-            self.control, text="4. Load & Plot (Excel)", command=self._load_data_thread, font=self.ui_style
-        )
-        self.load_btn.pack(fill="x", pady=2)
-
-        # Minimum zone size (seconds)
-        ctk.CTkLabel(self.control, text="Min Zone Size (s):", anchor="w", font=self.ui_style).pack(fill="x")
+        # 4. Load & Plot
+        self.load_btn = ctk.CTkButton(cf, text="4. Load & Plot (Excel)", command=self._load_data_thread, font=self.ui_style)
+        self.load_btn.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
+        ctk.CTkLabel(cf, text="Min Zone Size (s):", font=self.ui_style).grid(row=r, column=0, sticky="w")
+        r+=1
         self.min_var = tk.DoubleVar(value=30.0)
-        self.min_entry = ctk.CTkEntry(self.control, textvariable=self.min_var, font=self.ui_style)
-        self.min_entry.pack(fill="x", pady=2)
+        self.min_entry = ctk.CTkEntry(cf, textvariable=self.min_var, font=self.ui_style)
+        self.min_entry.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
 
-        # --- Section 5: Confirm drawn zones ---
-        self.confirm_btn = ctk.CTkButton(
-            self.control, text="5. Confirm Zones", command=self._confirm, font=self.ui_style
-        )
-        self.confirm_btn.pack(fill="x", pady=2)
+        # 5. Confirm Zones
+        self.confirm_btn = ctk.CTkButton(cf, text="5. Confirm Zones", command=self._confirm, font=self.ui_style)
+        self.confirm_btn.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
 
-        # Save options (toggle Parquet vs. PDF)
-        ctk.CTkLabel(self.control, text="Save Options", anchor="w", font=self.ui_style).pack(fill="x", pady=2)
-        self.save_data_switch = ctk.CTkSwitch(
-            self.control, text="Save as data (Parquet)", variable=self.save_data_mode, font=self.ui_style
-        ) 
-        self.save_data_switch.pack(anchor="w", pady=2)
+        # 6. Save Options
+        ctk.CTkLabel(cf, text="Save Options", font=self.ui_style).grid(row=r, column=0, sticky="w", pady=(10,2))
+        r+=1
+        self.save_data_switch = ctk.CTkSwitch(cf, text="Save as data (Parquet)", variable=self.save_data_mode, font=self.ui_style)
+        self.save_data_switch.grid(row=r, column=0, sticky="w", pady=2)
+        r+=1
 
-        # --- Section 6: Save analysis/data ---
-        self.save_btn = ctk.CTkButton(
-            self.control, text="6. Save", command=self._save_analysis, font=self.ui_style
-        )
-        self.save_btn.pack(fill="x", pady=2)
+        # 7. Save Button
+        self.save_btn = ctk.CTkButton(cf, text="6. Save", command=self._save_analysis, font=self.ui_style)
+        self.save_btn.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
 
-        # --- Section 7: Check for Updates ---
-        self.update_btn = ctk.CTkButton(
-            self.control, text="7. Check for Updates", command=self._check_for_updates, font=self.ui_style
-        )
-        self.update_btn.pack(fill="x", pady=2)
+        # 8. Export Zones
+        self.export_zones_btn = ctk.CTkButton(cf, text="7. Export Zones to Parquet", command=self._export_zones, font=self.ui_style)
+        self.export_zones_btn.grid(row=r, column=0, sticky="ew", pady=2)
+        r+=1
 
-        # --- Section 8: Export drawn zones as separate Parquet files ---
-        self.export_zones_btn = ctk.CTkButton(
-            self.control,
-            text="8. Export Zones to Parquet",
-            command=self._export_zones,
-            font=self.ui_style
-        )
-        self.export_zones_btn.pack(fill="x", pady=2)
+        # --- Section 8: Check for Updates (Comment back in to readd update button to allow users to check update url for new updates)---
+        # self.update_btn = ctk.CTkButton(
+        #     self.control, text="8. Check for Updates", command=self._check_for_updates, font=self.ui_style
+        # )
+        # self.update_btn.pack(fill="x", pady=2)
 
     def _build_plot(self):
         """
         Set up the matplotlib Figure and Axes inside a CTkFrame, attach the canvas,
         and initialize the RectangleSelector (for drawing zones) plus loading GIF/logo.
         """
-        self.fig, self.ax = plt.subplots(figsize=(6, 5))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.timePlot)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        NavigationToolbar2Tk(self.canvas, self.timePlot)
-
-        # RectangleSelector (will be activated once data is ready)
-        self.rs = None
+        self.fig, self.ax = plt.subplots()
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_container)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        NavigationToolbar2Tk(self.canvas, self.plot_container)
         self.canvas.mpl_connect("button_press_event", self._on_click)
+
+        self.rs = None # RectangleSelector will be instantiated once data is loaded
 
         # Loading GIF setup
         loading_widget = self.canvas.get_tk_widget()
@@ -258,7 +272,7 @@ class AlphaAnalysisApp(ctk.CTk):
         self.loading_gif_frames = []
         self.current_frame = 0
         self.loading_label = tk.Label(
-            self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0
+            self.plot_container, bd=0, bg=canvas_bg, highlightthickness=0
         )
         self.finished_loading_event = threading.Event()
 
@@ -269,7 +283,7 @@ class AlphaAnalysisApp(ctk.CTk):
         logo = Image.open(self.logo_path)
         self.logo = ImageTk.PhotoImage(logo.convert("RGBA"))
         self.logo_label = tk.Label(
-            self.timePlot, bd=0, bg=canvas_bg, highlightthickness=0, image=self.logo
+            self.plot_container, bd=0, bg=canvas_bg, highlightthickness=0, image=self.logo
         )
         self.logo_label.place(relx=1, rely=0, anchor="ne")
         self.logo_label.lift(self.canvas.get_tk_widget())
@@ -288,35 +302,18 @@ class AlphaAnalysisApp(ctk.CTk):
         Rescale fonts and redraw axis text when the window is resized.
         """
         self._resize_job = None
-        w = self.winfo_width() or self.base_width
-        h = self.winfo_height() or self.base_height
-        scale = min(w / self.base_width, h / self.base_height)
-        new_size = max(6, min(int(self.base_font_size * scale), 20))
-        self.ui_style = ("Segoe UI", new_size)
-
-        # Update font on all control widgets
-        for widget in self.control.winfo_children():
+        self._setup_scaling()
+        for w in self.control_frame.winfo_children():
             try:
-                widget.configure(font=self.ui_style)
-            except Exception:
+                w.configure(font=self.ui_style)
+            except:
                 pass
-
-        # Update Treeview font/rowheight
-        self.ttk_style.configure(
-            "Treeview", font=(self.ui_font, new_size), rowheight=new_size * 2
-        )
-        self.ttk_style.configure(
-            "Treeview.Heading", font=("Segoe UI", new_size // 2, "bold")
-        )
-        self.p_list.config(font=("Segoe UI", new_size))
-
-        # Update plot text sizes
-        if hasattr(self, "ax"):
-            for txt in [self.ax.title, self.ax.xaxis.label, self.ax.yaxis.label]:
-                txt.set_fontsize(new_size)
-            for lbl in self.ax.get_xticklabels() + self.ax.get_yticklabels():
-                lbl.set_fontsize(new_size)
-            self.canvas.draw()
+        # Update plot fonts
+        for txt in [self.ax.title, self.ax.xaxis.label, self.ax.yaxis.label]:
+            txt.set_fontsize(self.ui_style[1])
+        for lbl in self.ax.get_xticklabels() + self.ax.get_yticklabels():
+            lbl.set_fontsize(self.ui_style[1])
+        self.canvas.draw()
 
     def _on_control_configure(self, event):
         """
@@ -334,54 +331,43 @@ class AlphaAnalysisApp(ctk.CTk):
         path = filedialog.askopenfilename(filetypes=[("Excel/Parquet files", "*.xlsx *.xls *.parquet")])
         if not path:
             return
-
-        # Update label and reset state
         self.file_lbl.configure(text=path)
+        # Reset state & hide header preview
         self.header_row = None
         self.time_col = None
         self.pressure_cols = []
-        self.hdr_lbl.configure(text="Header row: None")
+        self.hdr_lbl.grid_remove()
+        self.preview.grid_remove()
         self.time_cb.config(state="disabled", values=[])
         self.time_cb.set("")
         self.p_list.delete(0, "end")
         self.zones = []
-
-        if os.path.splitext(self.file_lbl.cget("text"))[-1].lower() == ".parquet":
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".parquet":
             try:
                 df0 = pd.read_parquet(path)
-                self.preview.pack_forget()
-                self.hdr_lbl.pack_forget
-
                 cols = list(df0.columns)
                 self.time_cb.config(values=cols, state="readonly")
-                self.time_col = None
-                self.p_list.delete(0, "end")
                 for c in cols:
                     self.p_list.insert("end", c)
             except Exception as e:
                 tkmsg.showerror("Error", f"Could not load Parquet:\n{e}")
-                return
         else:
             try:
                 df0 = pd.read_excel(path, nrows=15, header=None)
-                self.hdr_lbl.pack(fill='x', pady=2, before=self.elapsed_switch)
-                self.preview.pack(fill="x", pady=2, before=self.elapsed_switch)
-                self.preview.pack_propagate(False)
-                
+                # Show header-selection widgets
+                self.hdr_lbl.grid()
+                self.preview.grid()
                 cols = [f"C{c}" for c in range(df0.shape[1])]
                 self.tree.config(columns=cols)
                 for c in cols:
                     self.tree.heading(c, text=c)
                     self.tree.column(c, width=80, stretch=False)
-
                 self.tree.delete(*self.tree.get_children())
                 for idx, row in df0.iterrows():
                     self.tree.insert("", "end", iid=str(idx), values=list(row))
             except Exception as e:
                 tkmsg.showerror("Error", f"Cannot read file:\n{e}")
-                return
-
-        
 
     def _on_header_select(self, event):
         """
